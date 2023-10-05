@@ -25,4 +25,19 @@ Refer to installation in [mmdetection](https://github.com/open-mmlab/mmdetection
 
 ___
 # Compile
+```
+mkdir -p catkin_ws/src
+cd catkin_ws/src
+git clone --recursive git@github.com:g-ch/single_camera_tracking.git
+```
 
+Before you run ```catkin build```, you need to change ```set(TENSORRT_ROOT xxx) ``` in CMakeList.txt to the installation directory of your TensorRT. And add the following lines in SuperPoint-SuperGlue-TensorRT/3rdparty/tensorrtbuffer/CmakeList.txt
+```
+set(TENSORRT_ROOT xxx) 
+include_directories(
+	${TENSORRT_ROOT}/include
+)
+```
+Replace ```xxx``` with your TensorRT installation directory.
+
+Then run ```catkin build``` in ```catkin_ws``` directory.

@@ -7,21 +7,24 @@ add_definitions(-w)
 
 add_subdirectory(${PROJECT_SOURCE_DIR}/SuperPoint-SuperGlue-TensorRT/3rdparty/tensorrtbuffer)
 
+find_package(catkin REQUIRED COMPONENTS
+  roscpp
+  cv_bridge
+  image_transport
+)
 
-find_package(catkin REQUIRED)
 find_package(OpenCV 4.2 REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(CUDA REQUIRED)
 find_package(yaml-cpp REQUIRED)
 
-
-catkin_package(
-)
+catkin_package()
 
 # change this to your TensorRT root directory
 set(TENSORRT_ROOT $ENV{HOME}/Documents/TensorRT-8.4.1.5) 
 
 include_directories(
+  ${catkin_INCLUDE_DIRS}
   ${PROJECT_SOURCE_DIR}/SuperPoint-SuperGlue-TensorRT
   ${PROJECT_SOURCE_DIR}/SuperPoint-SuperGlue-TensorRT/include
   ${OpenCV_INCLUDE_DIRS}
@@ -48,4 +51,4 @@ target_link_libraries(${PROJECT_NAME}_superglue_lib
 )
 
 add_executable(tracking src/tracking.cpp)
-target_link_libraries(tracking ${PROJECT_NAME}_superglue_lib)
+target_link_libraries(tracking ${PROJECT_NAME}_superglue_lib ${catkin_LIBRARIES} ${OpenCV_LIBS})
