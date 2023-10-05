@@ -1,0 +1,3 @@
+[submodule "SuperPoint-SuperGlue-TensorRT"]
+	path = SuperPoint-SuperGlue-TensorRT
+	url = git@github.com:yuefanhao/SuperPoint-SuperGlue-TensorRT.git
