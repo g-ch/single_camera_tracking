@@ -8,86 +8,154 @@
 #include "super_glue.h"
 #include "super_point.h"
 #include <ros/ros.h>
+#include <cv_bridge/cv_bridge.h>
+#include <image_transport/image_transport.h>
+#include <sensor_msgs/Image.h>
+#include <opencv2/opencv.hpp>
+#include <ros/package.h>
 
-int main(int argc, char** argv){
-    if (argc != 5) {
-        std::cerr << "./superpointglue_sequence config_path model_dir image_folder_absolutely_path output_folder_path" << std::endl;
-        return 0;
-    }
+class TrackingNode{
+public:
+    TrackingNode(){
+        initialization();
+    };
+    ~TrackingNode(){};
 
-    std::string config_path = argv[1];
-    std::string model_dir = argv[2];
-    std::string image_path = argv[3];
-    std::string output_path = argv[4];
-    std::vector<std::string> image_names;
-    GetFileNames(image_path, image_names);
-    Configs configs(config_path, model_dir);
-    int width = configs.superglue_config.image_width;
-    int height = configs.superglue_config.image_height;
+private:
+    ros::NodeHandle nh_;
+    ros::Subscriber image_sub_;
+    ros::Publisher image_pub_;
 
-    std::cout << "Building inference engine......" << std::endl;
-    auto superpoint = std::make_shared<SuperPoint>(configs.superpoint_config);
-    if (!superpoint->build()) {
-        std::cerr << "Error in SuperPoint building engine. Please check your onnx model path." << std::endl;
-        return 0;
-    }
-    auto superglue = std::make_shared<SuperGlue>(configs.superglue_config);
-    if (!superglue->build()) {
-        std::cerr << "Error in SuperGlue building engine. Please check your onnx model path." << std::endl;
-        return 0;
-    }
-    std::cout << "SuperPoint and SuperGlue inference engine build success." << std::endl;
+    std::shared_ptr<SuperPoint> superpoint_;
+    std::shared_ptr<SuperGlue> superglue_;
 
-    Eigen::Matrix<double, 259, Eigen::Dynamic> feature_points0;
-    cv::Mat image0 = cv::imread(image_names[0], cv::IMREAD_GRAYSCALE);
-    if(image0.empty()) {
-        std::cerr << "First image in the image folder is empty." << std::endl;
-        return 0;
-    }
-    cv::resize(image0, image0, cv::Size(width, height));
-    std::cout << "First image size: " << image0.cols << "x" << image0.rows << std::endl;
-    if (!superpoint->infer(image0, feature_points0)) {
-        std::cerr << "Failed when extracting features from first image." << std::endl;
-        return 0;
-    }
-    std::vector<cv::DMatch> init_matches;
-    superglue->matching_points(feature_points0, feature_points0, init_matches);
-    std::string mkdir_cmd = "mkdir -p " + output_path;
-    system(mkdir_cmd.c_str());
+    cv::Mat img_last_;
+    Eigen::Matrix<double, 259, Eigen::Dynamic> feature_points_last_;
+    bool last_frame_ready_ = false;
 
-    for (int index = 1; index < image_names.size(); ++index) {
-        Eigen::Matrix<double, 259, Eigen::Dynamic> feature_points1;
-        std::vector<cv::DMatch> superglue_matches;
-        cv::Mat image1 = cv::imread(image_names[index], cv::IMREAD_GRAYSCALE);
-        if(image1.empty()) continue;
-        cv::resize(image1, image1, cv::Size(width, height));
+    int width_, height_;
 
-        std::cout << "Second image size: " << image1.cols << "x" << image1.rows << std::endl;
+
+    /// @brief The function is used to get superpoint and superglue inference result
+    /// @param img 
+    void superglueInference(cv::Mat &img){
+        // Resize image
+        cv::resize(img, img, cv::Size(width_, height_));
+
+        // Add a timer
         auto start = std::chrono::high_resolution_clock::now();
-        if (!superpoint->infer(image1, feature_points1)) {
-            std::cerr << "Failed when extracting features from second image." << std::endl;
-            return 0;
+
+        // infer superpoint
+        Eigen::Matrix<double, 259, Eigen::Dynamic> feature_points;
+        superpoint_->infer(img, feature_points);
+
+        if(!last_frame_ready_){
+            last_frame_ready_ = true;
+            img_last_ = img;
+            feature_points_last_ = feature_points;
+            return;
         }
-        superglue->matching_points(feature_points0, feature_points1, superglue_matches);
+
+        // infer superglue
+        std::vector<cv::DMatch> superglue_matches;
+        superglue_->matching_points(feature_points_last_, feature_points, superglue_matches);
+
+        // End of timer
         auto end = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        double duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+        std::cout << "Inference cost " << duration / 1000 << " MS" << std::endl;
+
+        // draw matches
         cv::Mat match_image;
         std::vector<cv::KeyPoint> keypoints0, keypoints1;
-        for (size_t i = 0; i < feature_points0.cols(); ++i) {
-            double score = feature_points0(0, i);
-            double x = feature_points0(1, i);
-            double y = feature_points0(2, i);
+        for(size_t i = 0; i < feature_points_last_.cols(); ++i){
+            double score = feature_points_last_(0, i);
+            double x = feature_points_last_(1, i);
+            double y = feature_points_last_(2, i);
             keypoints0.emplace_back(x, y, 8, -1, score);
         }
-        for (size_t i = 0; i < feature_points1.cols(); ++i) {
-            double score = feature_points1(0, i);
-            double x = feature_points1(1, i);
-            double y = feature_points1(2, i);
+        for(size_t i = 0; i < feature_points.cols(); ++i){
+            double score = feature_points(0, i);
+            double x = feature_points(1, i);
+            double y = feature_points(2, i);
             keypoints1.emplace_back(x, y, 8, -1, score);
         }
-        VisualizeMatching(image0, keypoints0, image1, keypoints1, superglue_matches, match_image, duration.count());
-        cv::imwrite(output_path + "/" + std::to_string(index) + ".png", match_image);
+
+        cv::drawMatches(img_last_, keypoints0, img, keypoints1, superglue_matches, match_image);
+       
+        // Publish image
+        sensor_msgs::ImagePtr msg_pub = cv_bridge::CvImage(std_msgs::Header(), "bgr8", img).toImageMsg();
+
+        // Save image and feature points
+        cv::imshow("match_image", match_image);
+        cv::waitKey(10);
     }
-  
-  return 0;
+
+
+    /// @brief Image callback function
+    /// @param msg 
+    void imageCallback(const sensor_msgs::ImageConstPtr& msg){
+        cv_bridge::CvImagePtr cv_ptr;
+        try{
+            cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::RGB8);
+        }
+        catch (cv_bridge::Exception& e){
+            ROS_ERROR("cv_bridge exception: %s", e.what());
+            return;
+        }
+
+        cv::Mat img = cv_ptr->image;
+        // Convert to grayscale
+        cv::cvtColor(img, img, cv::COLOR_RGB2GRAY);
+        superglueInference(img);
+    }
+
+
+    /// @brief The function is used for initializating the node
+    void initialization(){
+        image_sub_ = nh_.subscribe("/camera/image_raw", 1, &TrackingNode::imageCallback, this);
+        image_pub_ = nh_.advertise<sensor_msgs::Image>("/camera/image_super_glued", 1);
+
+        std::string package_path = ros::package::getPath("single_camera_tracking");
+        std::string config_path = package_path + "/SuperPoint-SuperGlue-TensorRT/config/config.yaml";
+        std::string model_dir = package_path + "/SuperPoint-SuperGlue-TensorRT/weights/";
+        Configs configs(config_path, model_dir);
+
+        height_ = configs.superglue_config.image_height;
+        width_ = configs.superglue_config.image_width;
+
+        // Create superpoint detector and superglue matcher. Build engine
+        std::cout << "Building inference engine......" << std::endl;
+        superpoint_ = std::make_shared<SuperPoint>(configs.superpoint_config);
+        if (!superpoint_->build()){
+            std::cerr << "Error in SuperPoint building engine. Please check your onnx model path." << std::endl;
+            return;
+        }
+        superglue_ = std::make_shared<SuperGlue>(configs.superglue_config);
+        if (!superglue_->build()){
+            std::cerr << "Error in SuperGlue building engine. Please check your onnx model path." << std::endl;
+            return;
+        }
+        std::cout << "SuperPoint and SuperGlue inference engine build success." << std::endl;
+
+        test();
+
+        ros::spin();
+    }
+
+    void test(){
+        // load image
+        cv::Mat image0 = cv::imread("/home/clarence/git/SuperPoint-SuperGlue-TensorRT/data/1/rgb_00365.jpg", cv::IMREAD_GRAYSCALE);
+        cv::Mat image1 = cv::imread("/home/clarence/git/SuperPoint-SuperGlue-TensorRT/data/1/rgb_00366.jpg", cv::IMREAD_GRAYSCALE);
+
+        superglueInference(image0);
+        superglueInference(image1);
+    }
+};
+
+int main(int argc, char** argv){
+    ros::init(argc, argv, "tracking_node");
+    TrackingNode tracking_node;
+
+    return 0;
 }

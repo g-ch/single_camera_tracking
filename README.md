@@ -18,13 +18,14 @@ This package uses [SuperPoint-SuperGlue-TensorRT](https://github.com/yuefanhao/S
 Refer to installation in [mmdetection](https://github.com/open-mmlab/mmdetection).
 
 ### Ours
-
+In the step to install dependencies for mmdetection, you should have created an annaconda virtual environment (default name: openmmlab). Then you need to install rospkg in this environment.
 ```
-
+conda activate openmmlab
+pip install -U rospkg
 ```
 
 ___
-# Compile
+## Compile
 ```
 mkdir -p catkin_ws/src
 cd catkin_ws/src
@@ -41,3 +42,6 @@ include_directories(
 Replace ```xxx``` with your TensorRT installation directory.
 
 Then run ```catkin build``` in ```catkin_ws``` directory.
+
+___
+## Run

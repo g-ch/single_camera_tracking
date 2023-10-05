@@ -11,6 +11,7 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   cv_bridge
   image_transport
+  message_generation
 )
 
 find_package(OpenCV 4.2 REQUIRED)
@@ -48,6 +49,14 @@ target_link_libraries(${PROJECT_NAME}_superglue_lib
   ${CUDA_LIBRARIES}
   yaml-cpp
   tensorrtbuffer
+)
+
+# build msg
+add_message_files(
+  FILES
+  Keypoint.msg
+  MaskGroup.msg
+  MaskKpts.msg
 )
 
 add_executable(tracking src/tracking.cpp)
