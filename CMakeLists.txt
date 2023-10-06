@@ -19,7 +19,21 @@ find_package(Eigen3 REQUIRED)
 find_package(CUDA REQUIRED)
 find_package(yaml-cpp REQUIRED)
 
-catkin_package()
+# build msg
+add_message_files(
+  FILES
+  Keypoint.msg
+  MaskGroup.msg
+  MaskKpts.msg
+)
+
+generate_messages(
+  DEPENDENCIES
+  std_msgs
+  sensor_msgs
+)
+
+catkin_package(CATKIN_DEPENDS message_runtime)
 
 # change this to your TensorRT root directory
 set(TENSORRT_ROOT $ENV{HOME}/Documents/TensorRT-8.4.1.5) 
@@ -51,13 +65,8 @@ target_link_libraries(${PROJECT_NAME}_superglue_lib
   tensorrtbuffer
 )
 
-# build msg
-add_message_files(
-  FILES
-  Keypoint.msg
-  MaskGroup.msg
-  MaskKpts.msg
-)
+
+
 
 add_executable(tracking src/tracking.cpp)
 target_link_libraries(tracking ${PROJECT_NAME}_superglue_lib ${catkin_LIBRARIES} ${OpenCV_LIBS})

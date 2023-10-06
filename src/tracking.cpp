@@ -84,11 +84,17 @@ private:
         cv::drawMatches(img_last_, keypoints0, img, keypoints1, superglue_matches, match_image);
        
         // Publish image
-        sensor_msgs::ImagePtr msg_pub = cv_bridge::CvImage(std_msgs::Header(), "bgr8", img).toImageMsg();
+        cv_bridge::CvImage cv_image;
+        cv_image.image = match_image;
+        cv_image.encoding = "bgr8";
+        image_pub_.publish(cv_image.toImageMsg());
 
         // Save image and feature points
         cv::imshow("match_image", match_image);
         cv::waitKey(10);
+
+        img_last_ = img;
+        feature_points_last_ = feature_points;
     }
 
 
@@ -113,7 +119,7 @@ private:
 
     /// @brief The function is used for initializating the node
     void initialization(){
-        image_sub_ = nh_.subscribe("/camera/image_raw", 1, &TrackingNode::imageCallback, this);
+        image_sub_ = nh_.subscribe("/camera_rgb_image", 1, &TrackingNode::imageCallback, this);
         image_pub_ = nh_.advertise<sensor_msgs::Image>("/camera/image_super_glued", 1);
 
         std::string package_path = ros::package::getPath("single_camera_tracking");
@@ -138,7 +144,7 @@ private:
         }
         std::cout << "SuperPoint and SuperGlue inference engine build success." << std::endl;
 
-        test();
+        // test();
 
         ros::spin();
     }

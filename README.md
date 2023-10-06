@@ -17,6 +17,8 @@ This package uses [SuperPoint-SuperGlue-TensorRT](https://github.com/yuefanhao/S
 ### mmdetection
 Refer to installation in [mmdetection](https://github.com/open-mmlab/mmdetection).
 
+After install mmdetection, you need to download the pretrained model and config file. _TODO:Specifiy which one to download._
+
 ### Ours
 In the step to install dependencies for mmdetection, you should have created an annaconda virtual environment (default name: openmmlab). Then you need to install rospkg in this environment.
 ```
@@ -45,3 +47,23 @@ Then run ```catkin build``` in ```catkin_ws``` directory.
 
 ___
 ## Run
+
+
+___
+## Trouble Shooting
+#### 1. Libffi Version Problem
+When using anaconda to run mmdetection in ```instance_segmentation.py```. There might be a version mismatching problem of libffi. You will see
+```
+ImportError: /lib/x86_64-linux-gnu/libp11-kit.so.0: undefined symbol: ffi_type_pointer, version LIBFFI_BASE_7.0
+```
+To solve this issue, refer to [this](https://aitechtogether.com/python/92590.html). For non-Chinese readers, we translate the procedures in the following.
+
+Open the lib folder of your anaconda or miniconda environment installation folder. For example, ```cd /home/anaconda3/envs/xxx/lib```. Excute `ls -l` and you will see `libffi.so.7` is linked to `libffi.so.8.1.0`. 
+
+Backup `libffi.so.7` and relink it to `libffi.so.7.1.0` using the following commands.
+```
+mv libffi.so.7 libffi.so.7.backup
+sudo ln -s /lib/x86_64-linux-gnu/libffi.so.7.1.0 libffi.so.7
+sudo ldconfig
+```
+The problem should be solved.

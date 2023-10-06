@@ -15,6 +15,7 @@ import time
 import cv2
 import numpy as np
 import torch
+from single_camera_tracking.msg import Keypoint, MaskGroup, MaskKpts
 
 class InstanceSegmentation:
     def __init__(self):
@@ -31,11 +32,14 @@ class InstanceSegmentation:
         self.result_folder = "/home/clarence/ros_ws/semantic_dsp_ws/src/single_camera_tracking/data/result"
 
         # Set the image subscriber
-        self.image_sub = rospy.Subscriber("/camera/color/image_raw", Image, self.image_callback)
-        self.image_pub = rospy.Publisher("/camera/color/image_segmented", Image, queue_size=1)
+        self.image_sub = rospy.Subscriber("/camera_rgb_image", Image, self.image_callback)
+        self.mask_pub = rospy.Publisher("/mask_group", MaskGroup, queue_size=1)
 
         # Set the bridge
         self.bridge = CvBridge()
+
+        # Spin
+        rospy.spin()
 
     #Function to load the model
     def load_model(self, config, checkpoint, device='cuda:0'):
@@ -117,27 +121,20 @@ class InstanceSegmentation:
         masks = masks.astype(np.uint8)
         masks *= 255
 
-        # Save labels and bboxes to csv file.
-        with open(os.path.join(self.result_folder, '1.csv'), 'w') as label_file:
-            with open(os.path.join(self.result_folder, '1_bboxes.csv'), 'w') as bbox_file:
-                
-                # Save the results
-                seq = 0
-                for idx in high_confidence_idx_array:
-                    # Save the labels and confidence to csv file
-                    label_file.write(str(labels[idx]) + ',' + str(bboxes[idx, -1]) + '\n')
-
-                    # Save the bboxes with int pixel position to csv file
-                    bbox_file.write(str(int(bboxes[idx, 0])) + ',' + str(int(bboxes[idx, 1])) + ',' + str(int(bboxes[idx, 2])) + ',' + str(int(bboxes[idx, 3])) + '\n')
-
-                    # Save the masks to png files
-                    cv2.imwrite(os.path.join(self.result_folder, '1_' + str(seq) + '.png'), masks[idx, :, :])
-                    seq += 1
+        # Publish the results
+        mask_group = MaskGroup()
+        for idx in high_confidence_idx_array:
+            this_mask = MaskKpts()
+            this_mask.label = str(labels[idx])
+            this_mask.mask = masks[idx, :, :].flatten().tolist()
+            mask_group.header.stamp = rospy.Time.now()
+            mask_group.objects.append(this_mask)
+            self.mask_pub.publish(mask_group)
 
     def image_callback(self, msg):
         # Convert the image to OpenCV format
         try:
-            cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
         except CvBridgeError as e:
             print(e)
 
@@ -156,13 +153,13 @@ if __name__ == '__main__':
     # Initialize the class
     inst_seg = InstanceSegmentation()
 
-    # Load the image
-    img = '/home/clarence/git/SuperPoint-SuperGlue-TensorRT/data/1/rgb_00365.jpg'
-    img = cv2.imread(img)
+    # # Load the image
+    # img = '/home/clarence/git/SuperPoint-SuperGlue-TensorRT/data/1/rgb_00365.jpg'
+    # img = cv2.imread(img)
 
-    # Run inference TEST
-    result = inst_seg.inference(img, show=True)
-    inst_seg.result2mask(result)
+    # # Run inference TEST
+    # result = inst_seg.inference(img, show=True)
+    # inst_seg.result2mask(result)
 
     
 
