@@ -29,7 +29,7 @@ class InstanceSegmentation:
 
         # Set the confidence threshold
         self.confidence_threshold = 0.4
-        self.result_folder = "/home/clarence/ros_ws/semantic_dsp_ws/src/single_camera_tracking/data/result"
+        self.concerned_labels = [2, 5, 7] # 2: car 5: bus 7: truck
 
         # Set the image subscriber
         self.image_sub = rospy.Subscriber("/camera_rgb_image", Image, self.image_callback)
@@ -38,6 +38,8 @@ class InstanceSegmentation:
         # Set the bridge
         self.bridge = CvBridge()
 
+        self.frame_id = "map"
+
         # Spin
         rospy.spin()
 
@@ -45,19 +47,14 @@ class InstanceSegmentation:
     def load_model(self, config, checkpoint, device='cuda:0'):
         # Load the config
         config = mmcv.Config.fromfile(config)
-
         # Initialize the detector
         model = build_detector(config.model)
-
         # Load checkpoint
         checkpoint = load_checkpoint(model, checkpoint, map_location=device)
-
         # Set the classes of models for inference
         model.CLASSES = checkpoint['meta']['CLASSES']
-
         # We need to set the model's cfg for inference
         model.cfg = config
-
         # Convert the model to GPU
         model.to(device)
         # Convert the model into evaluation mode
@@ -77,7 +74,7 @@ class InstanceSegmentation:
         # Show the results
         show_result_pyplot(self.model, img, result, score_thr=0.3)
 
-    def result2mask(self, result):
+    def result2mask(self, result, show_result=True):
         # Process the results
         assert isinstance(result, tuple)
         bbox_result, mask_result = result
@@ -115,21 +112,45 @@ class InstanceSegmentation:
 
         # Remove the bboxes with low confidence
         high_confidence_idx_array = np.where(bboxes[:, -1] > self.confidence_threshold)[0]
-        print(high_confidence_idx_array)
 
-        # Change the True/False values in the masks to 255/0
+        # Remove the bboxes in high_confidence_idx_array that are not in the concerned_labels
+        concerned_labels_idx_array = []
+        for idx in high_confidence_idx_array:
+            if labels[idx] in self.concerned_labels:
+                concerned_labels_idx_array.append(idx)
+
+        # print(concerned_labels_idx_array)
+
+        # Change the True/False values in the masks to 1/0
         masks = masks.astype(np.uint8)
-        masks *= 255
+
+        # Show the results by overlaying the masks as one RGB image
+        if show_result:
+            # Overlay the masks
+            overlayed_mask = np.zeros([masks.shape[1], masks.shape[2], 3])
+            for idx in concerned_labels_idx_array:
+                # Set a random color for each mask
+                color = np.random.randint(0, 255, size=(3,))
+                print("color = ", color)
+                overlayed_mask[masks[idx, :, :] == 1] = color
+
+            # Show the RGB image
+            overlayed_mask = overlayed_mask.astype(np.uint8)
+            cv2.imshow("overlayed_mask", overlayed_mask)
+            cv2.waitKey(1)
 
         # Publish the results
         mask_group = MaskGroup()
-        for idx in high_confidence_idx_array:
+        # print("high confidence idx num = ", len(high_confidence_idx_array))
+        for idx in concerned_labels_idx_array:
             this_mask = MaskKpts()
             this_mask.label = str(labels[idx])
-            this_mask.mask = masks[idx, :, :].flatten().tolist()
+            this_mask.mask = self.bridge.cv2_to_imgmsg(masks[idx, :, :], encoding="mono8")
             mask_group.header.stamp = rospy.Time.now()
+            mask_group.header.frame_id = self.frame_id
             mask_group.objects.append(this_mask)
-            self.mask_pub.publish(mask_group)
+        
+        self.mask_pub.publish(mask_group)
 
     def image_callback(self, msg):
         # Convert the image to OpenCV format
@@ -138,11 +159,14 @@ class InstanceSegmentation:
         except CvBridgeError as e:
             print(e)
 
-        # Run inference
-        result = self.inference(cv_image, show=False)
-        print("Got inference result!")
-        self.result2mask(result)
+        self.frame_id = msg.header.frame_id
 
+        # Run inference and calculate the time
+        time_start = time.time()
+        result = self.inference(cv_image, show=False)
+        self.result2mask(result)
+        time_end = time.time()
+        print("Inference time (ms) = ", (time_end - time_start) * 1000)
         
     
 # Main function

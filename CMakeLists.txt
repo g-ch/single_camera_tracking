@@ -33,7 +33,7 @@ generate_messages(
   sensor_msgs
 )
 
-catkin_package(CATKIN_DEPENDS message_runtime)
+catkin_package(CATKIN_DEPENDS message_runtime sensor_msgs std_msgs)
 
 # change this to your TensorRT root directory
 set(TENSORRT_ROOT $ENV{HOME}/Documents/TensorRT-8.4.1.5) 
