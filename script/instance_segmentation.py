@@ -131,7 +131,7 @@ class InstanceSegmentation:
             for idx in concerned_labels_idx_array:
                 # Set a random color for each mask
                 color = np.random.randint(0, 255, size=(3,))
-                print("color = ", color)
+                # print("color = ", color)
                 overlayed_mask[masks[idx, :, :] == 1] = color
 
             # Show the RGB image

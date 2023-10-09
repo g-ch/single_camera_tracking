@@ -39,7 +39,16 @@ private:
     
     std::vector<cv::KeyPoint> keypoints_last_ori_img_; // keypoints of last frame in real-size image coordinate
     std::vector<cv::KeyPoint> keypoints_current_ori_img_; // keypoints of this frame in real-size image coordinate
+    
+    std::vector<int> tracking_ids_last_frame_; // track id of keypoints in the last frame
+    std::vector<int> tracking_ids_current_frame_; // track id of keypoints in this frame
+    
+    int next_tracking_id_; // next track id
+
     std::vector<cv::DMatch> superglue_matches_; // superglue matches
+
+    // define a color map to show different track ids
+    std::vector<cv::Scalar> color_map_;
 
     /// @brief Image callback function
     /// @param msg 
@@ -60,8 +69,6 @@ private:
         // Convert to grayscale
         cv::cvtColor(img, img, cv::COLOR_RGB2GRAY);
         superglueInference(img);
-
-        matched_points_ready_ = true;
 
         // End of timer
         auto end = std::chrono::high_resolution_clock::now();
@@ -104,7 +111,6 @@ private:
             last_frame_ready = true;
             img_last_ = img;
             feature_points_last = feature_points_current;
-            keypoints_last_ori_img_ = keypoints_current_ori_img_;
             keypoints_last = keypoints_current;
             return;
         }
@@ -113,6 +119,11 @@ private:
         std::vector<cv::DMatch> superglue_matches;
         superglue_->matching_points(feature_points_last, feature_points_current, superglue_matches);
         superglue_matches_ = superglue_matches;
+
+        // Print the number of keypoints in last frame and current frame and the number of matches
+        // std::cout << "keypoints_last.size() = " << keypoints_last.size() << std::endl;
+        // std::cout << "keypoints_current.size() = " << keypoints_current.size() << std::endl;
+        // std::cout << "superglue_matches.size() = " << superglue_matches.size() << std::endl;
 
         // draw matches
         if(draw_match)
@@ -133,8 +144,9 @@ private:
        
         img_last_ = img;
         feature_points_last = feature_points_current;
-        keypoints_last_ori_img_ = keypoints_current_ori_img_;
         keypoints_last = keypoints_current;
+        keypoints_last_ori_img_ = keypoints_current_ori_img_;
+        matched_points_ready_ = true;
     }
 
     /// @brief The function is used to callback segmentation result
@@ -167,33 +179,130 @@ private:
             }
             masks.push_back(cv_ptr->image);
         }
-        
-        // Iterate all matches in superglue_matches_. Find the matches whose current keypoint is in the mask
-        for(const auto &match : superglue_matches_)
-        {
-            // Get the current keypoint and matched last keypoint
-            cv::KeyPoint current_keypoint = keypoints_current_ori_img_[match.trainIdx];
-            cv::KeyPoint matched_last_keypoint = keypoints_last_ori_img_[match.queryIdx];
-            // Check which mask the current keypoint is in
-            for(size_t i = 0; i < masks.size(); ++i){
-                if(masks[i].at<uchar>(current_keypoint.pt.y, current_keypoint.pt.x) == 1){
-                    // The current keypoint is in the mask. Add it to the copied mask's keypoints.
-                    single_camera_tracking::Keypoint kpt_this, kpt_last;
-                    kpt_this.x = current_keypoint.pt.x;
-                    kpt_this.y = current_keypoint.pt.y;
-                    kpt_last.x = matched_last_keypoint.pt.x;
-                    kpt_last.y = matched_last_keypoint.pt.y;
-                    copied_msg.objects[i].kpts_curr.push_back(kpt_this);
-                    copied_msg.objects[i].kpts_last.push_back(kpt_last);
 
-                    break;
+        // Iterate all masks. Find the keypoints in each mask and store their indices.
+        std::vector<std::vector<int>> keypoints_in_masks(masks.size());
+        for (int i = 0; i < keypoints_current_ori_img_.size(); i++) {
+            const auto& kp = keypoints_current_ori_img_[i];
+            for (int m = 0; m < masks.size(); m++) {
+                if (masks[m].at<uchar>(round(kp.pt.y), round(kp.pt.x)) > 0) { // Each mask is a cv::Mat of type CV_8UC1, with non-zero pixels indicating the object.
+                    keypoints_in_masks[m].push_back(i);
+                    break; // A keypoint cannot be in multiple masks.
+                }
+            }
+        }
+
+        std::cout << "keypoints_in_masks.size() = " << keypoints_in_masks.size() << std::endl;
+
+        // Initialize tracking_ids_current_frame_ with -1
+        tracking_ids_current_frame_.resize(keypoints_current_ori_img_.size(), -1);
+        std::vector<int> track_ids_masks(masks.size());
+
+        // Handle the first frame pair.
+        if (tracking_ids_last_frame_.empty()) {
+            std::cout << "First frame pair" << std::endl;
+            // Handle the track ids of the first frame pair.
+            for (size_t m = 0; m < masks.size(); m++) {
+                track_ids_masks[m] = next_tracking_id_;
+                for (int i : keypoints_in_masks[m]) {
+                    tracking_ids_current_frame_[i] = next_tracking_id_;
+                }
+                next_tracking_id_ ++;
+            }
+
+            // Handle the matched keypoints of the first frame pair.
+            for (const cv::DMatch& match : superglue_matches_) {
+                int curr_idx = match.trainIdx;
+                int last_idx = match.queryIdx;
+                std::cout << "curr_idx = " << curr_idx << ", last_idx = " << last_idx << std::endl;
+                std::cout << "keypoints_current_ori_img.size() = " << keypoints_current_ori_img_.size() << std::endl;
+                std::cout << "keypoints_last_ori_img_.size() = " << keypoints_last_ori_img_.size() << std::endl;
+                for (int m = 0; m < masks.size(); m++) {
+                    if (masks[m].at<uchar>(round(keypoints_current_ori_img_[curr_idx].pt.y), round(keypoints_current_ori_img_[curr_idx].pt.x)) > 0) {
+                        single_camera_tracking::Keypoint kpt_curr, kpt_last;
+                        kpt_curr.x = keypoints_current_ori_img_[curr_idx].pt.x;
+                        kpt_curr.y = keypoints_current_ori_img_[curr_idx].pt.y;
+                        kpt_last.x = keypoints_last_ori_img_[last_idx].pt.x;
+                        kpt_last.y = keypoints_last_ori_img_[last_idx].pt.y;
+                        copied_msg.objects[m].kpts_curr.push_back(kpt_curr);
+                        copied_msg.objects[m].kpts_last.push_back(kpt_last);
+                        break;
+                    }
+                }
+            }
+
+            std::cout << "first frame pair finished" << std::endl;
+        } else{
+            // Set a matrix to quickly find the matched keypoints
+            cv::Mat match_matrix = cv::Mat::zeros(keypoints_current_ori_img_.size(), keypoints_last_ori_img_.size(), CV_8U);
+            for(const cv::DMatch& match : superglue_matches_) {
+                match_matrix.at<uchar>(match.trainIdx, match.queryIdx) = 1;
+            }
+
+            // Iterate all masks. Find the keypoints in each mask and store their indices.
+            for (int m = 0; m < masks.size(); m++) {
+                std::map<int, int> id_votes;
+                for (int i : keypoints_in_masks[m]) {
+                    for (int j = 0; j < keypoints_last_ori_img_.size(); j++) {
+                        if (match_matrix.at<uchar>(i, j) > 0) { // If the current keypoint is matched to a last keypoint.
+                            int tracking_id = tracking_ids_last_frame_[j];
+                            if (tracking_id >= 0) {
+                                id_votes[tracking_id]++;
+                            }
+
+                            // Storing matched keypoints for each mask.
+                            single_camera_tracking::Keypoint kpt_curr, kpt_last;
+                            kpt_curr.x = keypoints_current_ori_img_[i].pt.x;
+                            kpt_curr.y = keypoints_current_ori_img_[i].pt.y;
+                            kpt_last.x = keypoints_last_ori_img_[j].pt.x;
+                            kpt_last.y = keypoints_last_ori_img_[j].pt.y;
+                            copied_msg.objects[m].kpts_curr.push_back(kpt_curr);
+                            copied_msg.objects[m].kpts_last.push_back(kpt_last);
+
+                            break;  // Breaking the loop as one point can only have one match.
+                        }
+                    }
+                }
+
+                // Find the tracking ID with the most votes.
+                int best_tracking_id = -1;
+                int best_votes = 0;
+                for (const auto& [id, votes] : id_votes) {
+                    if (votes > best_votes) {
+                        best_tracking_id = id;
+                        best_votes = votes;
+                    }
+                }
+
+                std::cout << "best_tracking_id = " << best_tracking_id << ", best_votes = " << best_votes << std::endl;
+
+                // Decide whether to use the best existing tracking ID or a new one.
+                if (best_votes > 3) {
+                    track_ids_masks[m] = best_tracking_id;
+                    for (int i : keypoints_in_masks[m]) {
+                        tracking_ids_current_frame_[i] = best_tracking_id;
+                    }
+                    std::cout << "tracked object = " << best_tracking_id << std::endl;
+                } else {
+                    track_ids_masks[m] = next_tracking_id_;
+                    for (int i : keypoints_in_masks[m]) {
+                        tracking_ids_current_frame_[i] = next_tracking_id_;
+                    }
+                    std::cout << "Use next_tracking_id_ = " << next_tracking_id_ << std::endl;
+                    next_tracking_id_ ++;
                 }
             }
         }
 
         // Publish the copied message
         copied_msg.header.stamp = ros::Time::now();
+        for(size_t i = 0; i < masks.size(); ++i){
+            copied_msg.objects[i].track_id = track_ids_masks[i];
+        }
         mask_pub_.publish(copied_msg);
+
+        // Update for the next iteration.
+        tracking_ids_last_frame_ = tracking_ids_current_frame_;
 
         // Show the masks and matched current keypoints in one image
         cv::Mat mask_image = cv::Mat::zeros(masks[0].rows, masks[0].cols, CV_8UC3);
@@ -201,9 +310,9 @@ private:
             cv::Mat mask = masks[i];
             cv::Mat mask_color = cv::Mat::zeros(mask.rows, mask.cols, CV_8UC3);
 
-            // Set a random color for each mask
-            cv::RNG rng(i);
-            cv::Scalar color = cv::Scalar(rng.uniform(0, 255), rng.uniform(0, 255), rng.uniform(0, 255));
+            // Get a color from the color map for each track id
+            int track_id = track_ids_masks[i];
+            cv::Scalar color = color_map_[track_id % 256];
             mask_color.setTo(color, mask);
             mask_image = mask_image + mask_color;
 
@@ -220,6 +329,7 @@ private:
         return;
     }
 
+
     /// @brief The function is used for initializating the node
     void initialization(){
         raw_image_sub_ = nh_.subscribe("/camera_rgb_image", 1, &TrackingNode::imageCallback, this);
@@ -235,6 +345,15 @@ private:
 
         height_ = configs.superglue_config.image_height; //240
         width_ = configs.superglue_config.image_width; //320
+
+        next_tracking_id_ = 0;
+
+        // Set a random color map for visualization
+        for(int i=0; i<256; ++i){
+            cv::RNG rng(i);
+            cv::Scalar color = cv::Scalar(rng.uniform(0, 255), rng.uniform(0, 255), rng.uniform(0, 255));
+            color_map_.push_back(color);
+        }
 
         // Create superpoint detector and superglue matcher. Build engine
         std::cout << "Building inference engine......" << std::endl;
