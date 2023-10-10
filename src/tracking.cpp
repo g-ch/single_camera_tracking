@@ -18,6 +18,45 @@
 #include <single_camera_tracking/Keypoint.h>
 #include <unordered_set>
 
+
+class BoundingBox{
+public:
+    BoundingBox()
+    : x_min_(std::numeric_limits<double>::max()), 
+      x_max_(std::numeric_limits<double>::min()), 
+      y_min_(std::numeric_limits<double>::max()), 
+      y_max_(std::numeric_limits<double>::min()){
+    }
+    ~BoundingBox(){}
+
+    void setByTLAndBR(double tl_x, double tl_y, double br_x, double br_y){
+        x_min_ = tl_x;
+        y_min_ = tl_y;
+        x_max_ = br_x;
+        y_max_ = br_y;
+    }
+
+    double calculateIOU(const BoundingBox &other){
+        double x_min = std::max(x_min_, other.x_min_);
+        double y_min = std::max(y_min_, other.y_min_);
+        double x_max = std::min(x_max_, other.x_max_);
+        double y_max = std::min(y_max_, other.y_max_);
+
+        double intersection_area = std::max(0.0, x_max - x_min) * std::max(0.0, y_max - y_min);
+        double union_area = (x_max_ - x_min_) * (y_max_ - y_min_) + (other.x_max_ - other.x_min_) * (other.y_max_ - other.y_min_) - intersection_area;
+        if(union_area == 0.0){
+            return 0;
+        }
+        return intersection_area / union_area;
+    }
+
+    double size(){
+        return (x_max_ - x_min_) * (y_max_ - y_min_);
+    }
+
+    double x_min_, x_max_, y_min_, y_max_;
+};
+
 class TrackingNode{
 public:
     TrackingNode(){
@@ -43,9 +82,16 @@ private:
     
     std::vector<int> tracking_ids_last_frame_; // track id of keypoints in the last frame
     std::vector<int> tracking_ids_current_frame_; // track id of keypoints in this frame
+
+    std::vector<int> track_ids_masks_last_; // track id of masks in the last frame
+
+    std::vector<BoundingBox> bounding_boxes_last_frame_; // bounding boxes of objects in the last frame
+    std::vector<BoundingBox> bounding_boxes_current_frame_; // bounding boxes of objects in this frame
     
     int next_tracking_id_; // next track id
+
     int c_min_kpts_to_track_; // minimum number of keypoints to track
+    double bbox_size_threshold_; // minimum size of bounding box to track
 
     std::vector<cv::DMatch> superglue_matches_; // superglue matches
 
@@ -193,6 +239,14 @@ private:
             masks.push_back(cv_ptr->image);
         }
 
+        // Set bounding boxes
+        bounding_boxes_current_frame_.clear();
+        for(size_t i = 0; i < msg.objects.size(); ++i){
+            BoundingBox bounding_box;
+            bounding_box.setByTLAndBR(msg.objects[i].bbox_tl.x, msg.objects[i].bbox_tl.y, msg.objects[i].bbox_br.x, msg.objects[i].bbox_br.y);
+            bounding_boxes_current_frame_.emplace_back(bounding_box);
+        }
+
         // Iterate all masks. Find the keypoints in each mask and store their indices.
         std::vector<std::vector<int>> keypoints_in_masks(masks.size());
         for (int i = 0; i < keypoints_current_ori_img_.size(); i++) {
@@ -213,19 +267,16 @@ private:
         std::cout << "keypoints_in_masks.size() = " << keypoints_in_masks.size() << std::endl;
 
         // Initialize tracking_ids_current_frame_ with -1
-        tracking_ids_current_frame_.resize(keypoints_current_ori_img_.size(), -1);
-        std::vector<int> track_ids_masks(masks.size());
+        tracking_ids_current_frame_ = std::vector<int>(keypoints_current_ori_img_.size(), -1);
+        std::vector<int> track_ids_masks(masks.size(), -1);
             
         if(tracking_ids_last_frame_.empty()){ //first frame pair
             std::cout << "First frame pair. keypoints_last_ori_img_.size() = " << keypoints_last_ori_img_.size() << std::endl;
-            tracking_ids_last_frame_.resize(keypoints_last_ori_img_.size(), -1);
+            tracking_ids_last_frame_ = std::vector<int>(keypoints_last_ori_img_.size(), -1);
         }
 
         if(tracking_ids_last_frame_.size() != keypoints_last_ori_img_.size()){
             std::cout << "tracking_ids_last_frame_.size() = " << tracking_ids_last_frame_.size() << std::endl;
-            std::cout << "keypoints_current_ori_img_.size() = " << keypoints_current_ori_img_.size() << std::endl;
-            std::cout << "keypoints_last_ori_img_.size() = " << keypoints_last_ori_img_.size() << std::endl;
-            std::cout << "keypoints_ids_current_frame_.size() = " << tracking_ids_current_frame_.size() << std::endl;
             return;
         }
 
@@ -239,6 +290,15 @@ private:
         std::unordered_set<int> matched_track_ids;
         for (int m = 0; m < masks.size(); m++) {
             std::cout << "mask " << m << " total mask size = " << masks.size() << std::endl;
+            
+            //Ignore the mask if it is too small.
+            if(bounding_boxes_current_frame_[m].size() < bbox_size_threshold_){
+                std::cout << "mask " << m << " is too small. Ignore it." << std::endl;
+                track_ids_masks[m] = -1;
+                continue;
+            }
+
+            // Vote for the tracking ID with the most matched keypoints.
             std::map<int, int> id_votes;
             for (int i : keypoints_in_masks[m]) {
                 for (int j = 0; j < keypoints_last_ori_img_.size(); j++) {
@@ -248,7 +308,7 @@ private:
                             id_votes[tracking_id]++;
                         }
 
-                        // Storing matched keypoints for each mask.
+                        // Storing matched keypoints for each mask. To be published later.
                         single_camera_tracking::Keypoint kpt_curr, kpt_last;
                         kpt_curr.x = keypoints_current_ori_img_[i].pt.x;
                         kpt_curr.y = keypoints_current_ori_img_[i].pt.y;
@@ -277,25 +337,40 @@ private:
             // Decide whether to use the best existing tracking ID or a new one.
             if (best_tracking_id >=0 && best_votes >= 3 && matched_track_ids.find(best_tracking_id) == matched_track_ids.end()) {
                 track_ids_masks[m] = best_tracking_id;
-                for (int i : keypoints_in_masks[m]) {
-                    tracking_ids_current_frame_[i] = best_tracking_id;
-                }
                 matched_track_ids.insert(best_tracking_id);
                 std::cout << "tracked object = " << best_tracking_id << std::endl;
-            } else if(keypoints_in_masks[m].size() >= c_min_kpts_to_track_) { // If the number of keypoints in the mask is large enough, use a new tracking ID.
+            } 
+            else if(keypoints_in_masks[m].size() >= c_min_kpts_to_track_) { // If the number of keypoints in the mask is large enough but no matched found, use a new tracking ID.
                 track_ids_masks[m] = next_tracking_id_;
-                for (int i : keypoints_in_masks[m]) {
-                    tracking_ids_current_frame_[i] = next_tracking_id_;
-                }
-                std::cout << "Use next_tracking_id_ = " << next_tracking_id_ << std::endl;
                 next_tracking_id_ ++;
-            } else{
-                track_ids_masks[m] = -1; // Do not track this mask.
-                std::cout << "Will not track mask " << m << std::endl;
+                std::cout << "Use next_tracking_id_ = " << next_tracking_id_ << std::endl;
+            } 
+            else{
+                // Try to match by IOU with the bounding boxes of the last frame in case too less features are matched.
+                for(int i = 0; i < bounding_boxes_last_frame_.size(); ++i){
+                    double iou = bounding_boxes_current_frame_[m].calculateIOU(bounding_boxes_last_frame_[i]);
+                    if(iou > 0.5){
+                        int id = track_ids_masks_last_[i];
+                        if(matched_track_ids.find(id) == matched_track_ids.end()){
+                            std::cout << "IOU tracked object = " << id << std::endl;
+                            if(id < 0){
+                                id = next_tracking_id_;
+                                next_tracking_id_ ++;
+                            }
+                            track_ids_masks[m] = id;
+                            matched_track_ids.insert(id);
+                            std::cout << "IOU Make it a new tracking id = " << id << std::endl;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Set the track id of the mask to the keypoints in the mask.
+            for (int i : keypoints_in_masks[m]) {
+                tracking_ids_current_frame_[i] = track_ids_masks[m];
             }
         }
-
-        std::cout << "tracking finished" << std::endl;
 
         // Publish the copied message
         copied_msg.header.stamp = ros::Time::now();
@@ -304,20 +379,21 @@ private:
         }
         mask_pub_.publish(copied_msg);
 
-        std::cout << "Message published" << std::endl;
-
         // Show the result in a single image
-        showResult(masks, track_ids_masks, copied_msg);
+        showResult(masks, bounding_boxes_current_frame_, track_ids_masks, copied_msg);
 
         // Update for the next iteration.
         tracking_ids_last_frame_ = tracking_ids_current_frame_;
         matched_points_ready_ = false;
+        bounding_boxes_last_frame_ = bounding_boxes_current_frame_;
+        track_ids_masks_last_ = track_ids_masks;
+
         std::cout << "segmentationResultCallback finished" << std::endl;
         return;
     }
 
     /// @brief The function is used to show the tracking result in a single image
-    void showResult(const std::vector<cv::Mat> &masks, const std::vector<int> &track_ids_masks, const single_camera_tracking::MaskGroup &msg)
+    void showResult(const std::vector<cv::Mat> &masks, const std::vector<BoundingBox> &bboxes, const std::vector<int> &track_ids_masks, const single_camera_tracking::MaskGroup &msg)
     {
         // Show the masks and matched current keypoints in one image
         cv::Mat mask_image = cv::Mat::zeros(masks[0].rows, masks[0].cols, CV_8UC3);
@@ -337,6 +413,9 @@ private:
             mask_color.setTo(color, mask);
             mask_image = mask_image + mask_color;
 
+            // Add bounding box
+            cv::rectangle(mask_image, cv::Point(bboxes[i].x_min_, bboxes[i].y_min_), cv::Point(bboxes[i].x_max_, bboxes[i].y_max_), color, 1);
+
             // Add matched current keypoints
             cv::Scalar reversed_color = cv::Scalar(255 - color[0], 255 - color[1], 255 - color[2]);
             for(const auto &kpt : msg.objects[i].kpts_curr){
@@ -352,9 +431,10 @@ private:
             if(x_sum != 0 && y_sum != 0){
                 int x_center = x_sum / msg.objects[i].kpts_curr.size();
                 int y_center = y_sum / msg.objects[i].kpts_curr.size();
-                cv::putText(mask_image, std::to_string(track_id), cv::Point(x_center, y_center), cv::FONT_HERSHEY_SIMPLEX, 0.5, reversed_color, 1);
+                cv::putText(mask_image, std::to_string(track_id), cv::Point(x_center, y_center), cv::FONT_HERSHEY_SIMPLEX, 0.8, reversed_color, 2);
             }
         }
+
         cv::imshow("mask_image", mask_image);
         cv::waitKey(10);
     }
@@ -379,7 +459,8 @@ private:
         next_tracking_id_ = 0;
         matched_points_ready_ = false;
 
-        c_min_kpts_to_track_ = 3;
+        c_min_kpts_to_track_ = 5;
+        bbox_size_threshold_ = 3000;
 
         // Set a random color map for visualization
         for(int i=0; i<256; ++i){

@@ -134,6 +134,14 @@ class InstanceSegmentation:
                 # print("color = ", color)
                 overlayed_mask[masks[idx, :, :] == 1] = color
 
+            # draw bounding boxes
+            for idx in concerned_labels_idx_array:
+                bbox = bboxes[idx, :4].astype(np.int32)
+                label_text = f'{labels[idx]}'
+                # print("label_text = ", label_text)
+                cv2.rectangle(overlayed_mask, (bbox[0], bbox[1]), (bbox[2], bbox[3]), (0, 255, 0), 1)
+                cv2.putText(overlayed_mask, label_text, (bbox[0], bbox[1] - 2), cv2.FONT_HERSHEY_COMPLEX, 0.5, (0, 255, 0), 1)
+
             # Show the RGB image
             overlayed_mask = overlayed_mask.astype(np.uint8)
             cv2.imshow("overlayed_mask", overlayed_mask)
@@ -144,6 +152,10 @@ class InstanceSegmentation:
         # print("high confidence idx num = ", len(high_confidence_idx_array))
         for idx in concerned_labels_idx_array:
             this_mask = MaskKpts()
+            this_mask.bbox_tl.x = bboxes[idx, 0]
+            this_mask.bbox_tl.y = bboxes[idx, 1]
+            this_mask.bbox_br.x = bboxes[idx, 2]
+            this_mask.bbox_br.y = bboxes[idx, 3]
             this_mask.label = str(labels[idx])
             this_mask.mask = self.bridge.cv2_to_imgmsg(masks[idx, :, :], encoding="mono8")
             mask_group.header.stamp = rospy.Time.now()
