@@ -1,6 +1,13 @@
-//
-// Created by haoyuefan on 2021/9/22.
-//
+/**
+ * @file tracking.cpp
+ * @author Clarence Chen (g-ch@github.com)
+ * @brief Using SuperPoint and SuperGlue to track objects and output the keypoints of the objects
+ * @version 0.1
+ * @date 2023-10-2
+ * 
+ * @copyright Copyright (c) 2023
+ * 
+ */
 
 #include <memory>
 #include <chrono>
@@ -13,10 +20,24 @@
 #include <sensor_msgs/Image.h>
 #include <opencv2/opencv.hpp>
 #include <ros/package.h>
-#include <single_camera_tracking/MaskGroup.h>
-#include <single_camera_tracking/MaskKpts.h>
-#include <single_camera_tracking/Keypoint.h>
+#include <mask_kpts_msgs/MaskGroup.h>
+#include <mask_kpts_msgs/MaskKpts.h>
+#include <mask_kpts_msgs/Keypoint.h>
 #include <unordered_set>
+#include <message_filters/subscriber.h>
+#include <message_filters/synchronizer.h>
+#include <message_filters/sync_policies/approximate_time.h>
+
+#include <pcl_conversions/pcl_conversions.h>
+#include <sensor_msgs/PointCloud2.h>
+#include <geometry_msgs/PoseStamped.h>
+
+// define camera intrinsic parameters.
+/// TODO: Use a yaml file to store the camera intrinsic parameters
+const float c_camera_fx = 725.0087f; ///< Focal length in x direction. Unit: pixel
+const float c_camera_fy = 725.0087f; ///< Focal length in y direction. Unit: pixel
+const float c_camera_cx = 620.5f; ///< Principal point in x direction. Unit: pixel
+const float c_camera_cy = 187.f; ///< Principal point in y direction. Unit: pixel
 
 
 class BoundingBox{
@@ -66,27 +87,30 @@ public:
 
 private:
     ros::NodeHandle nh_;
-    ros::Subscriber raw_image_sub_, segmentation_result_sub_;
-    ros::Publisher image_pub_, mask_pub_;
+    ros::Subscriber raw_image_sub_, segmentation_result_sub_, camera_pose_sub_;
+    ros::Publisher image_pub_, mask_pub_, key_points_pub_;
 
     std::shared_ptr<SuperPoint> superpoint_;
     std::shared_ptr<SuperGlue> superglue_;
 
     cv::Mat img_last_;
+    cv::Mat depth_img_last_;
+    cv::Mat depth_img_curr_;
+
     bool matched_points_ready_;
 
     int width_, height_; // image size
     
     std::vector<cv::KeyPoint> keypoints_last_ori_img_; // keypoints of last frame in real-size image coordinate
-    std::vector<cv::KeyPoint> keypoints_current_ori_img_; // keypoints of this frame in real-size image coordinate
+    std::vector<cv::KeyPoint> keypoints_curr_ori_img_; // keypoints of this frame in real-size image coordinate
     
     std::vector<int> tracking_ids_last_frame_; // track id of keypoints in the last frame
-    std::vector<int> tracking_ids_current_frame_; // track id of keypoints in this frame
+    std::vector<int> tracking_ids_curr_frame_; // track id of keypoints in this frame
 
     std::vector<int> track_ids_masks_last_; // track id of masks in the last frame
 
     std::vector<BoundingBox> bounding_boxes_last_frame_; // bounding boxes of objects in the last frame
-    std::vector<BoundingBox> bounding_boxes_current_frame_; // bounding boxes of objects in this frame
+    std::vector<BoundingBox> bounding_boxes_curr_frame_; // bounding boxes of objects in this frame
     
     int next_tracking_id_; // next track id
 
@@ -98,23 +122,36 @@ private:
     // define a color map to show different track ids
     std::vector<cv::Scalar> color_map_;
 
+    Eigen::Vector3d camera_position_curr_, camera_position_last_;
+    Eigen::Quaterniond camera_orientation_curr_, camera_orientation_last_;
+
+
     /// @brief Image callback function
-    /// @param msg 
-    void imageCallback(const sensor_msgs::ImageConstPtr& msg){
-        cv_bridge::CvImagePtr cv_ptr;
+    /// @param rgb_msg 
+    /// @param depth_msg
+    void imageCallback(const sensor_msgs::ImageConstPtr& rgb_msg, const sensor_msgs::ImageConstPtr& depth_msg, const geometry_msgs::PoseStampedConstPtr& camera_pose_msg){
+        cv_bridge::CvImagePtr cv_ptr, cv_ptr_depth;
         try{
-            cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::RGB8);
+            cv_ptr = cv_bridge::toCvCopy(rgb_msg, sensor_msgs::image_encodings::RGB8);
+            cv_ptr_depth = cv_bridge::toCvCopy(depth_msg, sensor_msgs::image_encodings::TYPE_32FC1);
         }
         catch (cv_bridge::Exception& e){
             ROS_ERROR("cv_bridge exception: %s", e.what());
             return;
         }
 
+        // Get camera pose
+        camera_position_curr_ = Eigen::Vector3d(camera_pose_msg->pose.position.x, camera_pose_msg->pose.position.y, camera_pose_msg->pose.position.z);
+        camera_orientation_curr_ = Eigen::Quaterniond(camera_pose_msg->pose.orientation.w, camera_pose_msg->pose.orientation.x, camera_pose_msg->pose.orientation.y, camera_pose_msg->pose.orientation.z);
+
         // Add a timer
         auto start = std::chrono::high_resolution_clock::now();
 
+        // Get image
         cv::Mat img = cv_ptr->image;
-        // Convert to grayscale
+        depth_img_curr_ = cv_ptr_depth->image;
+
+        // Convert RGB to grayscale and do inference
         cv::cvtColor(img, img, cv::COLOR_RGB2GRAY);
         superglueInference(img);
 
@@ -139,38 +176,46 @@ private:
         cv::resize(img, img, cv::Size(width_, height_));
 
         // infer superpoint
-        Eigen::Matrix<double, 259, Eigen::Dynamic> feature_points_current;
+        Eigen::Matrix<double, 259, Eigen::Dynamic> feature_points_curr;
         static Eigen::Matrix<double, 259, Eigen::Dynamic> feature_points_last;
-        superpoint_->infer(img, feature_points_current);
+        superpoint_->infer(img, feature_points_curr);
 
         // Find keypoint correspondences
         static std::vector<cv::KeyPoint> keypoints_last;
-        std::vector<cv::KeyPoint> keypoints_current;
-        keypoints_current_ori_img_.clear();
-        for(size_t i = 0; i < feature_points_current.cols(); ++i){
-            double score = feature_points_current(0, i);
-            double x = feature_points_current(1, i);
-            double y = feature_points_current(2, i);
-            keypoints_current.emplace_back(x, y, 8, -1, score);
+        std::vector<cv::KeyPoint> keypoints_curr;
+        keypoints_curr_ori_img_.clear();
+        for(size_t i = 0; i < feature_points_curr.cols(); ++i){
+            double score = feature_points_curr(0, i);
+            double x = feature_points_curr(1, i);
+            double y = feature_points_curr(2, i);
+            keypoints_curr.emplace_back(x, y, 8, -1, score);
 
             // Convert to real-size image coordinate
             x = x / width_ * img_ori_width;
             y = y / height_ * img_ori_height;
-            keypoints_current_ori_img_.emplace_back(x, y, 8, -1, score);
+            keypoints_curr_ori_img_.emplace_back(x, y, 8, -1, score);
         }
 
-        static bool last_frame_ready = false;
-        if(!last_frame_ready){
-            last_frame_ready = true;
+        static cv::Mat depth_img_last_exchange;
+        static Eigen::Vector3d camera_position_last_exchange;
+        static Eigen::Quaterniond camera_orientation_last_exchange;
+
+        // Check if it is the first frame
+        static bool first_frame = true;
+        if(first_frame){
+            first_frame = false;
             img_last_ = img;
-            feature_points_last = feature_points_current;
-            keypoints_last = keypoints_current;
+            feature_points_last = feature_points_curr;
+            keypoints_last = keypoints_curr;
+            depth_img_last_exchange = depth_img_curr_; // Set the first depth image to the last depth image
+            camera_position_last_exchange = camera_position_curr_;
+            camera_orientation_last_exchange = camera_orientation_curr_;
             return;
         }
 
         // infer superglue
         std::vector<cv::DMatch> superglue_matches;
-        superglue_->matching_points(feature_points_last, feature_points_current, superglue_matches);
+        superglue_->matching_points(feature_points_last, feature_points_curr, superglue_matches);
         superglue_matches_ = superglue_matches;
 
         // Set keypoints_last_ori_img_
@@ -189,7 +234,7 @@ private:
         if(draw_match)
         {
             cv::Mat match_image;
-            cv::drawMatches(img_last_, keypoints_last, img, keypoints_current, superglue_matches, match_image);
+            cv::drawMatches(img_last_, keypoints_last, img, keypoints_curr, superglue_matches, match_image);
 
             // Publish image
             cv_bridge::CvImage cv_image;
@@ -201,15 +246,23 @@ private:
             cv::imshow("match_image", match_image);
             cv::waitKey(10);
         }
-       
+
+        depth_img_last_ = depth_img_last_exchange; // Set the last depth image to the depth image of the last frame
+        depth_img_last_exchange = depth_img_curr_;
+
+        camera_position_last_ = camera_position_last_exchange;
+        camera_position_last_exchange = camera_position_curr_;
+        camera_orientation_last_ = camera_orientation_last_exchange;
+        camera_orientation_last_exchange = camera_orientation_curr_;
+
         img_last_ = img;
-        feature_points_last = feature_points_current;
-        keypoints_last = keypoints_current;
+        feature_points_last = feature_points_curr;
+        keypoints_last = keypoints_curr;
         matched_points_ready_ = true;
     }
 
     /// @brief The function is used to callback segmentation result
-    void segmentationResultCallback(const single_camera_tracking::MaskGroup& msg){
+    void segmentationResultCallback(const mask_kpts_msgs::MaskGroup& msg){
         if(!matched_points_ready_){
             std::cout << "No matched points ready !!!!!!!!!" << std::endl;
             return;
@@ -218,11 +271,15 @@ private:
         if(msg.objects.size() == 0){
             std::cout << "No mask received !!!!!!!!!" << std::endl;
             matched_points_ready_ = false;
+            // Publish the original message
+            mask_kpts_msgs::MaskGroup copied_msg = msg;
+            copied_msg.header.stamp = ros::Time::now();
+            mask_pub_.publish(copied_msg);
             return;
         }
 
         // Copy the message to a local variable
-        single_camera_tracking::MaskGroup copied_msg = msg;
+        mask_kpts_msgs::MaskGroup copied_msg = msg;
 
         // Create a vector to store all the masks
         std::vector<cv::Mat> masks;
@@ -240,17 +297,17 @@ private:
         }
 
         // Set bounding boxes
-        bounding_boxes_current_frame_.clear();
+        bounding_boxes_curr_frame_.clear();
         for(size_t i = 0; i < msg.objects.size(); ++i){
             BoundingBox bounding_box;
             bounding_box.setByTLAndBR(msg.objects[i].bbox_tl.x, msg.objects[i].bbox_tl.y, msg.objects[i].bbox_br.x, msg.objects[i].bbox_br.y);
-            bounding_boxes_current_frame_.emplace_back(bounding_box);
+            bounding_boxes_curr_frame_.emplace_back(bounding_box);
         }
 
         // Iterate all masks. Find the keypoints in each mask and store their indices.
         std::vector<std::vector<int>> keypoints_in_masks(masks.size());
-        for (int i = 0; i < keypoints_current_ori_img_.size(); i++) {
-            const auto& kp = keypoints_current_ori_img_[i];
+        for (int i = 0; i < keypoints_curr_ori_img_.size(); i++) {
+            const auto& kp = keypoints_curr_ori_img_[i];
             int pt_y = round(kp.pt.y);
             int pt_x = round(kp.pt.x);
             if(pt_y < 0 || pt_y >= masks[0].rows || pt_x < 0 || pt_x >= masks[0].cols){
@@ -266,8 +323,8 @@ private:
 
         std::cout << "keypoints_in_masks.size() = " << keypoints_in_masks.size() << std::endl;
 
-        // Initialize tracking_ids_current_frame_ with -1
-        tracking_ids_current_frame_ = std::vector<int>(keypoints_current_ori_img_.size(), -1);
+        // Initialize tracking_ids_curr_frame_ with -1
+        tracking_ids_curr_frame_ = std::vector<int>(keypoints_curr_ori_img_.size(), -1);
         std::vector<int> track_ids_masks(masks.size(), -1);
             
         if(tracking_ids_last_frame_.empty()){ //first frame pair
@@ -281,10 +338,14 @@ private:
         }
 
         // Set a matrix to quickly find the matched keypoints
-        cv::Mat match_matrix = cv::Mat::zeros(keypoints_current_ori_img_.size(), keypoints_last_ori_img_.size(), CV_8U);
+        cv::Mat match_matrix = cv::Mat::zeros(keypoints_curr_ori_img_.size(), keypoints_last_ori_img_.size(), CV_8U);
         for(const cv::DMatch& match : superglue_matches_) {
             match_matrix.at<uchar>(match.trainIdx, match.queryIdx) = 1;
         }
+
+        pcl::PointCloud<pcl::PointXYZRGB> key_points;
+        Eigen::Matrix3d camera_orientation_matrix_curr_ = camera_orientation_curr_.toRotationMatrix();
+        Eigen::Matrix3d camera_orientation_matrix_last_ = camera_orientation_last_.toRotationMatrix();
 
         // Iterate all masks. Find the keypoints in each mask and store their indices.
         std::unordered_set<int> matched_track_ids;
@@ -292,7 +353,7 @@ private:
             std::cout << "mask " << m << " total mask size = " << masks.size() << std::endl;
             
             //Ignore the mask if it is too small.
-            if(bounding_boxes_current_frame_[m].size() < bbox_size_threshold_){
+            if(bounding_boxes_curr_frame_[m].size() < bbox_size_threshold_){
                 std::cout << "mask " << m << " is too small. Ignore it." << std::endl;
                 track_ids_masks[m] = -1;
                 continue;
@@ -302,20 +363,75 @@ private:
             std::map<int, int> id_votes;
             for (int i : keypoints_in_masks[m]) {
                 for (int j = 0; j < keypoints_last_ori_img_.size(); j++) {
-                    if (match_matrix.at<uchar>(i, j) > 0) { // If the current keypoint is matched to a last keypoint.
+                    if (match_matrix.at<uchar>(i, j) > 0) { // If the curr keypoint is matched to a last keypoint.
                         int tracking_id = tracking_ids_last_frame_[j];
                         if (tracking_id >= 0) {
                             id_votes[tracking_id]++;
                         }
 
-                        // Storing matched keypoints for each mask. To be published later.
-                        single_camera_tracking::Keypoint kpt_curr, kpt_last;
-                        kpt_curr.x = keypoints_current_ori_img_[i].pt.x;
-                        kpt_curr.y = keypoints_current_ori_img_[i].pt.y;
-                        kpt_last.x = keypoints_last_ori_img_[j].pt.x;
-                        kpt_last.y = keypoints_last_ori_img_[j].pt.y;
+                        // Storing matched keypoints for each mask. Use depth um image and camera intrinsic parameters to calculate the 3D position of the keypoints.
+                        /// TODO: Remove the points with invalid depth.
+                        Eigen::Vector3d p_curr_global, p_last_global;
+                        p_curr_global[0] = keypoints_curr_ori_img_[i].pt.x;
+                        p_curr_global[1] = keypoints_curr_ori_img_[i].pt.y;
+                        p_curr_global[2] = depth_img_curr_.at<float>(p_curr_global[1], p_curr_global[0]);
+                        p_curr_global[0] = (p_curr_global[0] - c_camera_cx) * p_curr_global[2] / c_camera_fx;
+                        p_curr_global[1] = (p_curr_global[1] - c_camera_cy) * p_curr_global[2] / c_camera_fy;
+                        p_curr_global = camera_orientation_matrix_curr_ * p_curr_global + camera_position_curr_;
+
+                        p_last_global[0] = keypoints_last_ori_img_[j].pt.x;
+                        p_last_global[1] = keypoints_last_ori_img_[j].pt.y;
+                        p_last_global[2] = depth_img_last_.at<float>(p_last_global[1], p_last_global[0]);
+                        p_last_global[0] = (p_last_global[0] - c_camera_cx) * p_last_global[2] / c_camera_fx;
+                        p_last_global[1] = (p_last_global[1] - c_camera_cy) * p_last_global[2] / c_camera_fy;
+                        p_last_global = camera_orientation_matrix_last_ * p_last_global + camera_position_last_;
+
+                        mask_kpts_msgs::Keypoint kpt_curr, kpt_last;
+                        kpt_curr.x = p_curr_global[0];
+                        kpt_curr.y = p_curr_global[1];
+                        kpt_curr.z = p_curr_global[2];
+                        kpt_last.x = p_last_global[0];
+                        kpt_last.y = p_last_global[1];
+                        kpt_last.z = p_last_global[2];
                         copied_msg.objects[m].kpts_curr.push_back(kpt_curr);
                         copied_msg.objects[m].kpts_last.push_back(kpt_last);
+
+
+                        // mask_kpts_msgs::Keypoint kpt_curr, kpt_last;
+                        // kpt_curr.x = keypoints_curr_ori_img_[i].pt.x;
+                        // kpt_curr.y = keypoints_curr_ori_img_[i].pt.y;
+                        // kpt_curr.z = depth_img_curr_.at<float>(kpt_curr.y, kpt_curr.x);
+                        // kpt_curr.x = (kpt_curr.x - c_camera_cx) * kpt_curr.z / c_camera_fx;
+                        // kpt_curr.y = (kpt_curr.y - c_camera_cy) * kpt_curr.z / c_camera_fy;
+                        // kpt_last.x = keypoints_last_ori_img_[j].pt.x;
+                        // kpt_last.y = keypoints_last_ori_img_[j].pt.y;
+                        // kpt_last.z = depth_img_last_.at<float>(kpt_last.y, kpt_last.x);
+                        // kpt_last.x = (kpt_last.x - c_camera_cx) * kpt_last.z / c_camera_fx;
+                        // kpt_last.y = (kpt_last.y - c_camera_cy) * kpt_last.z / c_camera_fy;
+                        // copied_msg.objects[m].kpts_curr.push_back(kpt_curr);
+                        // copied_msg.objects[m].kpts_last.push_back(kpt_last);
+
+                        pcl::PointXYZRGB p_curr, p_last;
+                        p_curr.x = kpt_curr.x;
+                        p_curr.y = kpt_curr.y;
+                        p_curr.z = kpt_curr.z;
+                        p_curr.r = ((m+2)*30) % 255; // Set a color for each mask
+                        p_curr.g = 0;
+                        p_curr.b = 0;
+
+                        p_last.x = kpt_last.x;
+                        p_last.y = kpt_last.y;
+                        p_last.z = kpt_last.z;
+                        p_last.r = 0;
+                        p_last.g = ((m+2)*30) % 255; // Set a color for each mask
+                        p_last.b = 0;
+
+                        key_points.push_back(p_curr);
+                        key_points.push_back(p_last);
+
+                        // Show kpt_curr and kpt_last
+                        // std::cout << "kpt_curr = " << kpt_curr.x << ", " << kpt_curr.y << ", " << kpt_curr.z << std::endl;
+                        // std::cout << "kpt_last = " << kpt_last.x << ", " << kpt_last.y << ", " << kpt_last.z << std::endl;
 
                         break;  // Breaking the loop as one point can only have one match.
                     }
@@ -348,7 +464,7 @@ private:
             else{
                 // Try to match by IOU with the bounding boxes of the last frame in case too less features are matched.
                 for(int i = 0; i < bounding_boxes_last_frame_.size(); ++i){
-                    double iou = bounding_boxes_current_frame_[m].calculateIOU(bounding_boxes_last_frame_[i]);
+                    double iou = bounding_boxes_curr_frame_[m].calculateIOU(bounding_boxes_last_frame_[i]);
                     if(iou > 0.5){
                         int id = track_ids_masks_last_[i];
                         if(matched_track_ids.find(id) == matched_track_ids.end()){
@@ -368,9 +484,16 @@ private:
 
             // Set the track id of the mask to the keypoints in the mask.
             for (int i : keypoints_in_masks[m]) {
-                tracking_ids_current_frame_[i] = track_ids_masks[m];
+                tracking_ids_curr_frame_[i] = track_ids_masks[m];
             }
         }
+
+        // Publish the key points for visualization
+        sensor_msgs::PointCloud2 key_points_msg;
+        pcl::toROSMsg(key_points, key_points_msg);
+        key_points_msg.header.stamp = ros::Time::now();
+        key_points_msg.header.frame_id = "map";
+        key_points_pub_.publish(key_points_msg);
 
         // Publish the copied message
         copied_msg.header.stamp = ros::Time::now();
@@ -380,12 +503,12 @@ private:
         mask_pub_.publish(copied_msg);
 
         // Show the result in a single image
-        showResult(masks, bounding_boxes_current_frame_, track_ids_masks, copied_msg);
+        showResult(masks, bounding_boxes_curr_frame_, track_ids_masks, copied_msg);
 
         // Update for the next iteration.
-        tracking_ids_last_frame_ = tracking_ids_current_frame_;
+        tracking_ids_last_frame_ = tracking_ids_curr_frame_;
         matched_points_ready_ = false;
-        bounding_boxes_last_frame_ = bounding_boxes_current_frame_;
+        bounding_boxes_last_frame_ = bounding_boxes_curr_frame_;
         track_ids_masks_last_ = track_ids_masks;
 
         std::cout << "segmentationResultCallback finished" << std::endl;
@@ -393,9 +516,9 @@ private:
     }
 
     /// @brief The function is used to show the tracking result in a single image
-    void showResult(const std::vector<cv::Mat> &masks, const std::vector<BoundingBox> &bboxes, const std::vector<int> &track_ids_masks, const single_camera_tracking::MaskGroup &msg)
+    void showResult(const std::vector<cv::Mat> &masks, const std::vector<BoundingBox> &bboxes, const std::vector<int> &track_ids_masks, const mask_kpts_msgs::MaskGroup &msg)
     {
-        // Show the masks and matched current keypoints in one image
+        // Show the masks and matched curr keypoints in one image
         cv::Mat mask_image = cv::Mat::zeros(masks[0].rows, masks[0].cols, CV_8UC3);
         for(size_t i = 0; i < masks.size(); ++i){
             cv::Mat mask = masks[i];
@@ -416,13 +539,13 @@ private:
             // Add bounding box
             cv::rectangle(mask_image, cv::Point(bboxes[i].x_min_, bboxes[i].y_min_), cv::Point(bboxes[i].x_max_, bboxes[i].y_max_), color, 1);
 
-            // Add matched current keypoints
+            // Add matched curr keypoints
             cv::Scalar reversed_color = cv::Scalar(255 - color[0], 255 - color[1], 255 - color[2]);
             for(const auto &kpt : msg.objects[i].kpts_curr){
                 cv::circle(mask_image, cv::Point(kpt.x, kpt.y), 2, reversed_color, -1);
             }
 
-            // Find the center of the matched current keypoints and write the track id
+            // Find the center of the matched curr keypoints and write the track id
             int x_sum = 0, y_sum = 0;
             for(const auto &kpt : msg.objects[i].kpts_curr){
                 x_sum += kpt.x;
@@ -442,11 +565,21 @@ private:
 
     /// @brief The function is used for initializating the node
     void initialization(){
-        raw_image_sub_ = nh_.subscribe("/camera_rgb_image", 1, &TrackingNode::imageCallback, this);
+        //raw_image_sub_ = nh_.subscribe("/camera_rgb_image", 1, &TrackingNode::imageCallback, this);
+        
+        // Subscribe to camera_rgb_image, camera_depth_image and camera pose synchronously
+        message_filters::Subscriber<sensor_msgs::Image> rgb_image_sub(nh_, "/camera_rgb_image", 1);
+        message_filters::Subscriber<sensor_msgs::Image> depth_image_sub(nh_, "/camera_depth_image", 1);
+        message_filters::Subscriber<geometry_msgs::PoseStamped> camera_pose_sub(nh_, "/camera_pose", 1);
+        typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Image, geometry_msgs::PoseStamped> MySyncPolicy;
+        message_filters::Synchronizer<MySyncPolicy> sync(MySyncPolicy(10), rgb_image_sub, depth_image_sub, camera_pose_sub);
+        sync.registerCallback(boost::bind(&TrackingNode::imageCallback, this, _1, _2, _3));
+
         segmentation_result_sub_ = nh_.subscribe("/mask_group", 1, &TrackingNode::segmentationResultCallback, this);
 
         image_pub_ = nh_.advertise<sensor_msgs::Image>("/camera/image_super_glued", 1);
-        mask_pub_ = nh_.advertise<single_camera_tracking::MaskGroup>("/mask_group_super_glued", 1);
+        mask_pub_ = nh_.advertise<mask_kpts_msgs::MaskGroup>("/mask_group_super_glued", 1);
+        key_points_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("/key_points", 1);
 
         std::string package_path = ros::package::getPath("single_camera_tracking");
         std::string config_path = package_path + "/SuperPoint-SuperGlue-TensorRT/config/config.yaml";
@@ -456,7 +589,7 @@ private:
         height_ = configs.superglue_config.image_height; //240
         width_ = configs.superglue_config.image_width; //320
 
-        next_tracking_id_ = 0;
+        next_tracking_id_ = 1; //Start from 1. CHG
         matched_points_ready_ = false;
 
         c_min_kpts_to_track_ = 5;

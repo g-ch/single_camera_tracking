@@ -15,7 +15,7 @@ import time
 import cv2
 import numpy as np
 import torch
-from single_camera_tracking.msg import Keypoint, MaskGroup, MaskKpts
+from mask_kpts_msgs.msg import Keypoint, MaskGroup, MaskKpts
 
 class InstanceSegmentation:
     def __init__(self):
@@ -118,8 +118,6 @@ class InstanceSegmentation:
         for idx in high_confidence_idx_array:
             if labels[idx] in self.concerned_labels:
                 concerned_labels_idx_array.append(idx)
-
-        # print(concerned_labels_idx_array)
 
         # Change the True/False values in the masks to 1/0
         masks = masks.astype(np.uint8)
