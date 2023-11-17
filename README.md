@@ -8,18 +8,20 @@ __Tested environment: Ubuntu 20.04 + ROS Noetic__
 This package uses [SuperPoint-SuperGlue-TensorRT](https://github.com/yuefanhao/SuperPoint-SuperGlue-TensorRT) and [mmdetection](https://github.com/open-mmlab/mmdetection). Therefore, you need to install the required environment for these two projects first.
 
 ### SuperPoint-SuperGlue-TensorRT
-- [CUDA 11.6](https://developer.nvidia.com/cuda-11-6-0-download-archive). CUDA 11.x should all works.
-- [TensorRT 8.4](https://docs.nvidia.com/deeplearning/tensorrt/install-guide/index.html#installing-tar). Use tar file installation.
-- OpenCV 4
-- Eigen
-- yaml-cpp
+- [CUDA 11.6](https://developer.nvidia.com/cuda-11-6-0-download-archive) and cudnn. CUDA 11.x should all works.
+- [CUDNN](https://docs.nvidia.com/deeplearning/cudnn/install-guide/index.html#installlinux-tar). Using tar file installation is suggested. Unpack and move the files to the folder given in the instructions.
+- [TensorRT 8.4](https://docs.nvidia.com/deeplearning/tensorrt/install-guide/index.html#installing-tar). Using tar file installation is suggested. After you have unpacked TensorRT tar file, add "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:xxx/TensorRT-8.4.1.5/lib", where "xxx" is the installation path of TensorRT, to .bashrc.
+- OpenCV 4. The version installed with ROS Noetic is sufficient.
+- Eigen. The version installed with ROS Noetic is sufficient.
+- [yaml-cpp](https://github.com/jbeder/yaml-cpp). Follow the instructions in the link, make and sudo make install.
+
 
 ### mmdetection
 Refer to installation in [mmdetection](https://github.com/open-mmlab/mmdetection).
 
 After install mmdetection, you need to download the pretrained model and config file. _TODO:Specifiy which one to download._
 
-### Ours
+### ROS Python Package
 In the step to install dependencies for mmdetection, you should have created an annaconda virtual environment (default name: openmmlab). Then you need to install rospkg in this environment.
 ```
 conda activate openmmlab
@@ -47,7 +49,18 @@ Then run ```catkin build``` in ```catkin_ws``` directory.
 
 ___
 ## Run
+- Run segmentation node by
+```
+conda activate openmmlab
+rosrun single_camera_tracking instance_segmentation.py
+```
 
+- Run superpoint_superglue and tracking node by
+```
+conda activate openmmlab
+rosrun single_camera_tracking tracking
+``` 
+Note the first time you run this node you will see ```Building inference engine......```. It will take about 15 minutes to 1 hour to build. 
 
 ___
 ## Trouble Shooting
