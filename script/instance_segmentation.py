@@ -74,7 +74,7 @@ class InstanceSegmentation:
         # Show the results
         show_result_pyplot(self.model, img, result, score_thr=0.3)
 
-    def result2mask(self, result, show_result=True):
+    def result2mask(self, cv_image, result, show_result=True):
         # Process the results
         assert isinstance(result, tuple)
         bbox_result, mask_result = result
@@ -124,7 +124,6 @@ class InstanceSegmentation:
 
         # Show the results by overlaying the masks as one RGB image
         if show_result:
-            # Overlay the masks
             overlayed_mask = np.zeros([masks.shape[1], masks.shape[2], 3])
             for idx in concerned_labels_idx_array:
                 # Set a random color for each mask
@@ -142,7 +141,8 @@ class InstanceSegmentation:
 
             # Show the RGB image
             overlayed_mask = overlayed_mask.astype(np.uint8)
-            cv2.imshow("overlayed_mask", overlayed_mask)
+            overlayed_image = cv2.addWeighted(cv_image, 0.5, overlayed_mask, 0.5, 0)
+            cv2.imshow("overlayed_image", overlayed_image)
             cv2.waitKey(1)
 
         # Publish the results
@@ -174,7 +174,7 @@ class InstanceSegmentation:
         # Run inference and calculate the time
         time_start = time.time()
         result = self.inference(cv_image, show=False)
-        self.result2mask(result)
+        self.result2mask(cv_image, result)
         time_end = time.time()
         print("Inference time (ms) = ", (time_end - time_start) * 1000)
         
