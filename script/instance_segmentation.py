@@ -20,8 +20,11 @@ from mask_kpts_msgs.msg import Keypoint, MaskGroup, MaskKpts
 class InstanceSegmentation:
     def __init__(self):
         # Mask2former
-        config = '/home/clarence/git/openmmlab/mmdetection/configs/mask2former/mask2former_r50_lsj_8x2_50e_coco.py'
-        checkpoint = '/home/clarence/git/openmmlab/mmdetection/mymodels/mask2former/ins_resnet_50/mask2former_r50_lsj_8x2_50e_coco_20220506_191028-8e96e88b.pth'
+        # config = '../model/mask2former_r50_8xb2-lsj-50e_coco-panoptic.py'
+        config = '/home/cc/git/mmdetection/configs/mask2former/mask2former_r50_lsj_8x2_50e_coco.py'
+        script_path = os.path.realpath(__file__)
+        current_directory = os.path.dirname(script_path)
+        checkpoint = current_directory + '/../model/mask2former_r50_lsj_8x2_50e_coco_20220506_191028-8e96e88b.pth'
 
         # Set the device to be used for evaluation
         device='cuda:0'
