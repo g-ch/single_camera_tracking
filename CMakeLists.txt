@@ -59,3 +59,6 @@ target_link_libraries(${PROJECT_NAME}_superglue_lib
 
 add_executable(tracking src/tracking.cpp)
 target_link_libraries(tracking ${PROJECT_NAME}_superglue_lib ${PCL_LIBRARIES} ${catkin_LIBRARIES} ${OpenCV_LIBS})
+
+add_executable(superpoint_test src/superpoint_test.cpp)
+target_link_libraries(superpoint_test ${PROJECT_NAME}_superglue_lib ${PCL_LIBRARIES} ${catkin_LIBRARIES} ${OpenCV_LIBS})

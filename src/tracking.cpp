@@ -38,6 +38,7 @@ const float c_camera_fx = 725.0087f; ///< Focal length in x direction. Unit: pix
 const float c_camera_fy = 725.0087f; ///< Focal length in y direction. Unit: pixel
 const float c_camera_cx = 620.5f; ///< Principal point in x direction. Unit: pixel
 const float c_camera_cy = 187.f; ///< Principal point in y direction. Unit: pixel
+const float points_too_far_threshold = 30.f; ///< Threshold to remove points that are too far away from the camera. Unit: meter
 
 
 class BoundingBox{
@@ -99,7 +100,7 @@ private:
 
     bool matched_points_ready_;
 
-    int width_, height_; // image size
+    int width_, height_; // image size for super glue
     
     std::vector<cv::KeyPoint> keypoints_last_ori_img_; // keypoints of last frame in real-size image coordinate
     std::vector<cv::KeyPoint> keypoints_curr_ori_img_; // keypoints of this frame in real-size image coordinate
@@ -359,6 +360,8 @@ private:
                 continue;
             }
 
+            int mask_b_color = (m * 50 + 50) % 255; // Set a color b channel for each mask
+
             // Vote for the tracking ID with the most matched keypoints.
             std::map<int, int> id_votes;
             for (int i : keypoints_in_masks[m]) {
@@ -386,6 +389,14 @@ private:
                         p_last_global[1] = (p_last_global[1] - c_camera_cy) * p_last_global[2] / c_camera_fy;
                         p_last_global = camera_orientation_matrix_last_ * p_last_global + camera_position_last_;
 
+                        // Check if the point is too far away from the camera
+                        if((p_curr_global - camera_position_curr_).norm() > points_too_far_threshold || (p_last_global - camera_position_last_).norm() > points_too_far_threshold){
+                            
+                            id_votes[tracking_id]--; // If the point is too far away, decrease the vote.
+                            continue;
+                        }
+
+                        // Add the matched keypoints to the message to be published for map building
                         mask_kpts_msgs::Keypoint kpt_curr, kpt_last;
                         kpt_curr.x = p_curr_global[0];
                         kpt_curr.y = p_curr_global[1];
@@ -396,35 +407,21 @@ private:
                         copied_msg.objects[m].kpts_curr.push_back(kpt_curr);
                         copied_msg.objects[m].kpts_last.push_back(kpt_last);
 
-
-                        // mask_kpts_msgs::Keypoint kpt_curr, kpt_last;
-                        // kpt_curr.x = keypoints_curr_ori_img_[i].pt.x;
-                        // kpt_curr.y = keypoints_curr_ori_img_[i].pt.y;
-                        // kpt_curr.z = depth_img_curr_.at<float>(kpt_curr.y, kpt_curr.x);
-                        // kpt_curr.x = (kpt_curr.x - c_camera_cx) * kpt_curr.z / c_camera_fx;
-                        // kpt_curr.y = (kpt_curr.y - c_camera_cy) * kpt_curr.z / c_camera_fy;
-                        // kpt_last.x = keypoints_last_ori_img_[j].pt.x;
-                        // kpt_last.y = keypoints_last_ori_img_[j].pt.y;
-                        // kpt_last.z = depth_img_last_.at<float>(kpt_last.y, kpt_last.x);
-                        // kpt_last.x = (kpt_last.x - c_camera_cx) * kpt_last.z / c_camera_fx;
-                        // kpt_last.y = (kpt_last.y - c_camera_cy) * kpt_last.z / c_camera_fy;
-                        // copied_msg.objects[m].kpts_curr.push_back(kpt_curr);
-                        // copied_msg.objects[m].kpts_last.push_back(kpt_last);
-
+                        // Visualize the matched keypoints
                         pcl::PointXYZRGB p_curr, p_last;
                         p_curr.x = kpt_curr.x;
                         p_curr.y = kpt_curr.y;
                         p_curr.z = kpt_curr.z;
-                        p_curr.r = ((m+2)*30) % 255; // Set a color for each mask
+                        p_curr.r = 255; 
                         p_curr.g = 0;
-                        p_curr.b = 0;
+                        p_curr.b = mask_b_color; // Set a color for each mask
 
                         p_last.x = kpt_last.x;
                         p_last.y = kpt_last.y;
                         p_last.z = kpt_last.z;
                         p_last.r = 0;
-                        p_last.g = ((m+2)*30) % 255; // Set a color for each mask
-                        p_last.b = 0;
+                        p_last.g = 255; 
+                        p_last.b = mask_b_color; // Set a color for each mask
 
                         key_points.push_back(p_curr);
                         key_points.push_back(p_last);
@@ -586,8 +583,8 @@ private:
         std::string model_dir = package_path + "/SuperPoint-SuperGlue-TensorRT/weights/";
         Configs configs(config_path, model_dir);
 
-        height_ = configs.superglue_config.image_height; //240
-        width_ = configs.superglue_config.image_width; //320
+        height_ = configs.superglue_config.image_height;
+        width_ = configs.superglue_config.image_width; 
 
         next_tracking_id_ = 1; //Start from 1. CHG
         matched_points_ready_ = false;
