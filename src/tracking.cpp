@@ -31,14 +31,21 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <geometry_msgs/PoseStamped.h>
+#include <yaml-cpp/yaml.h>
+
 
 // define camera intrinsic parameters.
-/// TODO: Use a yaml file to store the camera intrinsic parameters
-const float c_camera_fx = 725.0087f; ///< Focal length in x direction. Unit: pixel
-const float c_camera_fy = 725.0087f; ///< Focal length in y direction. Unit: pixel
-const float c_camera_cx = 620.5f; ///< Principal point in x direction. Unit: pixel
-const float c_camera_cy = 187.f; ///< Principal point in y direction. Unit: pixel
-const float points_too_far_threshold = 30.f; ///< Threshold to remove points that are too far away from the camera. Unit: meter
+float c_camera_fx = 725.0087f; ///< Focal length in x direction. Unit: pixel
+float c_camera_fy = 725.0087f; ///< Focal length in y direction. Unit: pixel
+float c_camera_cx = 620.5f; ///< Principal point in x direction. Unit: pixel
+float c_camera_cy = 187.f; ///< Principal point in y direction. Unit: pixel
+
+float points_too_far_threshold = 30.f; ///< Threshold to remove points that are too far away from the camera. Unit: meter
+float points_too_close_threshold = 0.5f; ///< Threshold to remove points that are too close to the camera. Unit: meter
+
+int c_vote_number_threshold = 3;
+float c_iou_threshold = 0.5f;
+double c_bbox_size_threshold = 1000.0; // minimum size of bounding box to track
 
 
 class BoundingBox{
@@ -115,8 +122,6 @@ private:
     
     int next_tracking_id_; // next track id
 
-    int c_min_kpts_to_track_; // minimum number of keypoints to track
-    double bbox_size_threshold_; // minimum size of bounding box to track
 
     std::vector<cv::DMatch> superglue_matches_; // superglue matches
 
@@ -354,7 +359,7 @@ private:
             std::cout << "mask " << m << " total mask size = " << masks.size() << std::endl;
             
             //Ignore the mask if it is too small.
-            if(bounding_boxes_curr_frame_[m].size() < bbox_size_threshold_){
+            if(bounding_boxes_curr_frame_[m].size() < c_bbox_size_threshold){
                 std::cout << "mask " << m << " is too small. Ignore it." << std::endl;
                 track_ids_masks[m] = -1;
                 continue;
@@ -389,10 +394,10 @@ private:
                         p_last_global[1] = (p_last_global[1] - c_camera_cy) * p_last_global[2] / c_camera_fy;
                         p_last_global = camera_orientation_matrix_last_ * p_last_global + camera_position_last_;
 
-                        // Check if the point is too far away from the camera
+                        // Check if the point is too far away from the camera. If so, don't use it for t_matrix estimation.
                         if((p_curr_global - camera_position_curr_).norm() > points_too_far_threshold || (p_last_global - camera_position_last_).norm() > points_too_far_threshold){
-                            
-                            id_votes[tracking_id]--; // If the point is too far away, decrease the vote.
+                            // Even if too far, it's still useful to track the object. So don't decrease the vote.
+                            // id_votes[tracking_id]--; // If the point is too far away, decrease the vote.
                             continue;
                         }
 
@@ -448,21 +453,16 @@ private:
             std::cout << "best_tracking_id = " << best_tracking_id << ", best_votes = " << best_votes << std::endl;
 
             // Decide whether to use the best existing tracking ID or a new one.
-            if (best_tracking_id >=0 && best_votes >= 3 && matched_track_ids.find(best_tracking_id) == matched_track_ids.end()) {
+            if (best_tracking_id >=0 && best_votes >= c_vote_number_threshold && matched_track_ids.find(best_tracking_id) == matched_track_ids.end()) {
                 track_ids_masks[m] = best_tracking_id;
                 matched_track_ids.insert(best_tracking_id);
                 std::cout << "tracked object = " << best_tracking_id << std::endl;
-            } 
-            else if(keypoints_in_masks[m].size() >= c_min_kpts_to_track_) { // If the number of keypoints in the mask is large enough but no matched found, use a new tracking ID.
-                track_ids_masks[m] = next_tracking_id_;
-                next_tracking_id_ ++;
-                std::cout << "Use next_tracking_id_ = " << next_tracking_id_ << std::endl;
             } 
             else{
                 // Try to match by IOU with the bounding boxes of the last frame in case too less features are matched.
                 for(int i = 0; i < bounding_boxes_last_frame_.size(); ++i){
                     double iou = bounding_boxes_curr_frame_[m].calculateIOU(bounding_boxes_last_frame_[i]);
-                    if(iou > 0.5){
+                    if(iou > c_iou_threshold){
                         int id = track_ids_masks_last_[i];
                         if(matched_track_ids.find(id) == matched_track_ids.end()){
                             std::cout << "IOU tracked object = " << id << std::endl;
@@ -589,9 +589,6 @@ private:
         next_tracking_id_ = 1; //Start from 1. CHG
         matched_points_ready_ = false;
 
-        c_min_kpts_to_track_ = 5;
-        bbox_size_threshold_ = 3000;
-
         // Set a random color map for visualization
         for(int i=0; i<256; ++i){
             cv::RNG rng(i);
@@ -630,7 +627,24 @@ private:
 
 int main(int argc, char** argv){
     ros::init(argc, argv, "tracking_node");
-    TrackingNode tracking_node;
+    
+    // Read parameters from yaml file
+    std::string package_path = ros::package::getPath("single_camera_tracking");
+    std::string config_path = package_path + "/cfg/settings.yaml";
 
+    YAML::Node config = YAML::LoadFile(config_path);
+    c_camera_fx = config["camera_fx"].as<float>();
+    c_camera_fy = config["camera_fy"].as<float>();
+    c_camera_cx = config["camera_cx"].as<float>();
+    c_camera_cy = config["camera_cy"].as<float>();
+    points_too_far_threshold = config["points_too_far_threshold"].as<float>();
+    points_too_close_threshold = config["points_too_close_threshold"].as<float>();
+    c_vote_number_threshold = config["vote_number_threshold"].as<int>();
+    c_iou_threshold = config["iou_threshold"].as<float>();
+    c_bbox_size_threshold = config["bbox_size_threshold"].as<double>();
+
+    // Create a node
+    TrackingNode tracking_node;
+    
     return 0;
 }

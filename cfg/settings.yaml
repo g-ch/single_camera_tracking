@@ -1,0 +1,11 @@
+camera_fx: 725.0087
+camera_fy: 725.0087
+camera_cx: 620.5
+camera_cy: 187.0
+
+points_too_far_threshold: 30.0
+points_too_close_threshold: 0.5
+
+vote_number_threshold: 3
+iou_threshold: 0.5
+bbox_size_threshold: 1000.0
