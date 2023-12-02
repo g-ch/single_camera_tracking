@@ -6,6 +6,6 @@ camera_cy: 187.0
 points_too_far_threshold: 30.0
 points_too_close_threshold: 0.5
 
-vote_number_threshold: 3
-iou_threshold: 0.5
-bbox_size_threshold: 1000.0
+min_vote_number_threshold: 3
+min_iou_threshold: 0.4
+min_bbox_size_threshold: 2000.0

@@ -34,7 +34,7 @@ class InstanceSegmentation:
         self.model = self.load_model(config, checkpoint, device)
 
         # Set the confidence threshold
-        self.confidence_threshold = 0.4
+        self.confidence_threshold = 0.8
         self.concerned_labels = [2, 5, 7] # 2: car 5: bus 7: truck
 
         # Set the image subscriber

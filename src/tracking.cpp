@@ -310,6 +310,19 @@ private:
             bounding_boxes_curr_frame_.emplace_back(bounding_box);
         }
 
+        // // Add the mask and bounding box to one image and show it. For debug.
+        // cv::Mat seg_mask_image = cv::Mat::zeros(masks[0].rows, masks[0].cols, CV_8UC1);
+        // for(size_t i = 0; i < masks.size(); ++i){
+        //     cv::Mat merged_img;
+        //     cv::max(masks[i], seg_mask_image, merged_img);
+        //     seg_mask_image = merged_img;
+        // }
+        // seg_mask_image = seg_mask_image * 255;
+        // for(size_t i = 0; i < bounding_boxes_curr_frame_.size(); ++i){
+        //     cv::rectangle(seg_mask_image, cv::Point(bounding_boxes_curr_frame_[i].x_min_, bounding_boxes_curr_frame_[i].y_min_), cv::Point(bounding_boxes_curr_frame_[i].x_max_, bounding_boxes_curr_frame_[i].y_max_), cv::Scalar(255), 1);
+        // }
+        // cv::imshow("seg_mask_image", seg_mask_image);
+
         // Iterate all masks. Find the keypoints in each mask and store their indices.
         std::vector<std::vector<int>> keypoints_in_masks(masks.size());
         for (int i = 0; i < keypoints_curr_ori_img_.size(); i++) {
@@ -349,9 +362,28 @@ private:
             match_matrix.at<uchar>(match.trainIdx, match.queryIdx) = 1;
         }
 
+        // Create a point cloud to store the matched keypoints for visualization
         pcl::PointCloud<pcl::PointXYZRGB> key_points;
+
+        // Get camera orientation matrix
         Eigen::Matrix3d camera_orientation_matrix_curr_ = camera_orientation_curr_.toRotationMatrix();
         Eigen::Matrix3d camera_orientation_matrix_last_ = camera_orientation_last_.toRotationMatrix();
+
+        // Make a mask for invalid depth points
+        cv::Mat invalid_depth_mask = cv::Mat::zeros(depth_img_curr_.rows, depth_img_curr_.cols, CV_8U);
+        for(int i = 0; i < depth_img_curr_.rows; ++i){
+            for(int j = 0; j < depth_img_curr_.cols; ++j){
+                if(depth_img_curr_.at<float>(i, j) > points_too_far_threshold || depth_img_curr_.at<float>(i, j) < points_too_close_threshold){
+                    invalid_depth_mask.at<uchar>(i, j) = 255;
+                }
+            }
+        }
+
+        // Dilate the invalid depth mask
+        cv::Mat element = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
+        cv::dilate(invalid_depth_mask, invalid_depth_mask, element);
+
+        cv::imshow("invalid_depth_mask tracking", invalid_depth_mask);
 
         // Iterate all masks. Find the keypoints in each mask and store their indices.
         std::unordered_set<int> matched_track_ids;
@@ -378,7 +410,6 @@ private:
                         }
 
                         // Storing matched keypoints for each mask. Use depth um image and camera intrinsic parameters to calculate the 3D position of the keypoints.
-                        /// TODO: Remove the points with invalid depth.
                         Eigen::Vector3d p_curr_global, p_last_global;
                         p_curr_global[0] = keypoints_curr_ori_img_[i].pt.x;
                         p_curr_global[1] = keypoints_curr_ori_img_[i].pt.y;
@@ -394,10 +425,13 @@ private:
                         p_last_global[1] = (p_last_global[1] - c_camera_cy) * p_last_global[2] / c_camera_fy;
                         p_last_global = camera_orientation_matrix_last_ * p_last_global + camera_position_last_;
 
-                        // Check if the point is too far away from the camera. If so, don't use it for t_matrix estimation.
-                        if((p_curr_global - camera_position_curr_).norm() > points_too_far_threshold || (p_last_global - camera_position_last_).norm() > points_too_far_threshold){
-                            // Even if too far, it's still useful to track the object. So don't decrease the vote.
-                            // id_votes[tracking_id]--; // If the point is too far away, decrease the vote.
+                        // // Check if the point is too far away from the camera. If so, don't use it for t_matrix estimation.
+                        // if((p_curr_global - camera_position_curr_).norm() > points_too_far_threshold || (p_last_global - camera_position_last_).norm() > points_too_far_threshold){
+                        //     continue;
+                        // }
+
+                        // Check if the point is too close or too far to the camera using the depth mask. If so, don't use it for t_matrix estimation.
+                        if(invalid_depth_mask.at<uchar>(keypoints_curr_ori_img_[i].pt.y, keypoints_curr_ori_img_[i].pt.x) > 0){
                             continue;
                         }
 
@@ -460,22 +494,34 @@ private:
             } 
             else{
                 // Try to match by IOU with the bounding boxes of the last frame in case too less features are matched.
+                bool iou_matched = false;
                 for(int i = 0; i < bounding_boxes_last_frame_.size(); ++i){
                     double iou = bounding_boxes_curr_frame_[m].calculateIOU(bounding_boxes_last_frame_[i]);
                     if(iou > c_iou_threshold){
                         int id = track_ids_masks_last_[i];
+                        iou_matched = true;
                         if(matched_track_ids.find(id) == matched_track_ids.end()){
-                            std::cout << "IOU tracked object = " << id << std::endl;
                             if(id < 0){
                                 id = next_tracking_id_;
                                 next_tracking_id_ ++;
+                                std::cout << "IOU Make it a new tracking id = " << id << std::endl;
+                            }else{
+                                std::cout << "IOU tracked object = " << id << std::endl;
                             }
                             track_ids_masks[m] = id;
                             matched_track_ids.insert(id);
-                            std::cout << "IOU Make it a new tracking id = " << id << std::endl;
                             break;
                         }
                     }
+                }
+
+                // If no matched tracking ID is found, create a new one.
+                if(!iou_matched){
+                    // If no matched tracking ID is found, create a new one.
+                    int id = next_tracking_id_;
+                    next_tracking_id_ ++;
+                    track_ids_masks[m] = id;
+                    std::cout << "No Keypoint and IOU matching. Make it a new tracking id = " << id << std::endl;
                 }
             }
 
@@ -542,17 +588,11 @@ private:
                 cv::circle(mask_image, cv::Point(kpt.x, kpt.y), 2, reversed_color, -1);
             }
 
-            // Find the center of the matched curr keypoints and write the track id
-            int x_sum = 0, y_sum = 0;
-            for(const auto &kpt : msg.objects[i].kpts_curr){
-                x_sum += kpt.x;
-                y_sum += kpt.y;
-            }
-            if(x_sum != 0 && y_sum != 0){
-                int x_center = x_sum / msg.objects[i].kpts_curr.size();
-                int y_center = y_sum / msg.objects[i].kpts_curr.size();
-                cv::putText(mask_image, std::to_string(track_id), cv::Point(x_center, y_center), cv::FONT_HERSHEY_SIMPLEX, 0.8, reversed_color, 2);
-            }
+            // Find the center of the bounding box and add the track id
+            int center_x = (bboxes[i].x_min_ + bboxes[i].x_max_) / 2;
+            int center_y = (bboxes[i].y_min_ + bboxes[i].y_max_) / 2;
+            std::string text = std::to_string(track_id);
+            cv::putText(mask_image, text, cv::Point(center_x, center_y), cv::FONT_HERSHEY_SIMPLEX, 0.8, reversed_color, 1);
         }
 
         cv::imshow("mask_image", mask_image);
@@ -639,9 +679,13 @@ int main(int argc, char** argv){
     c_camera_cy = config["camera_cy"].as<float>();
     points_too_far_threshold = config["points_too_far_threshold"].as<float>();
     points_too_close_threshold = config["points_too_close_threshold"].as<float>();
-    c_vote_number_threshold = config["vote_number_threshold"].as<int>();
-    c_iou_threshold = config["iou_threshold"].as<float>();
-    c_bbox_size_threshold = config["bbox_size_threshold"].as<double>();
+    c_vote_number_threshold = config["min_vote_number_threshold"].as<int>();
+    c_iou_threshold = config["min_iou_threshold"].as<float>();
+    c_bbox_size_threshold = config["min_bbox_size_threshold"].as<double>();
+
+    std::cout << "c_camera_fx = " << c_camera_fx << ", " << "c_camera_fy = " << c_camera_fy << ", " << "c_camera_cx = " << c_camera_cx << ", " << "c_camera_cy = " << c_camera_cy << std::endl;
+    std::cout << "points_too_far_threshold = " << points_too_far_threshold << ", " << "points_too_close_threshold = " << points_too_close_threshold << std::endl;
+    std::cout << "c_vote_number_threshold = " << c_vote_number_threshold << ", " << "c_iou_threshold = " << c_iou_threshold << ", " << "c_bbox_size_threshold = " << c_bbox_size_threshold << std::endl;
 
     // Create a node
     TrackingNode tracking_node;
