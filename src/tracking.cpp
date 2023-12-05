@@ -497,7 +497,14 @@ private:
                 bool iou_matched = false;
                 for(int i = 0; i < bounding_boxes_last_frame_.size(); ++i){
                     double iou = bounding_boxes_curr_frame_[m].calculateIOU(bounding_boxes_last_frame_[i]);
-                    if(iou > c_iou_threshold){
+                    
+                    // If the bounding box is at the edges of the image, decrease the correction factor to make it easier to match.
+                    double correction_factor = 1.0;
+                    if(bounding_boxes_curr_frame_[m].x_min_ < 10 || bounding_boxes_curr_frame_[m].x_max_ > masks[0].cols - 10 || bounding_boxes_curr_frame_[m].y_min_ < 10 || bounding_boxes_curr_frame_[m].y_max_ > masks[0].rows - 10){
+                        correction_factor = 0.5;
+                    }
+                    
+                    if(iou > c_iou_threshold*correction_factor){
                         int id = track_ids_masks_last_[i];
                         iou_matched = true;
                         if(matched_track_ids.find(id) == matched_track_ids.end()){
