@@ -122,6 +122,7 @@ private:
     
     int next_tracking_id_; // next track id
 
+    uint32_t seq_id_; // frame id
 
     std::vector<cv::DMatch> superglue_matches_; // superglue matches
 
@@ -140,6 +141,8 @@ private:
         try{
             cv_ptr = cv_bridge::toCvCopy(rgb_msg, sensor_msgs::image_encodings::RGB8);
             cv_ptr_depth = cv_bridge::toCvCopy(depth_msg, sensor_msgs::image_encodings::TYPE_32FC1);
+
+            seq_id_ = rgb_msg->header.seq;
         }
         catch (cv_bridge::Exception& e){
             ROS_ERROR("cv_bridge exception: %s", e.what());
@@ -269,17 +272,19 @@ private:
 
     /// @brief The function is used to callback segmentation result
     void segmentationResultCallback(const mask_kpts_msgs::MaskGroup& msg){
-        if(!matched_points_ready_){
-            std::cout << "No matched points ready !!!!!!!!!" << std::endl;
-            return;
-        }
+        // if(!matched_points_ready_){
+        //     std::cout << "No matched points ready !!!!!!!!!" << std::endl;
+        //     return;
+        // }
 
-        if(msg.objects.size() == 0){
-            std::cout << "No mask received !!!!!!!!!" << std::endl;
+        if(msg.objects.size() == 0 || !matched_points_ready_){
+            std::cout << "No mask received or No matched points ready !!!!!!!!!" << std::endl;
             matched_points_ready_ = false;
             // Publish the original message
             mask_kpts_msgs::MaskGroup copied_msg = msg;
             copied_msg.header.stamp = ros::Time::now();
+            copied_msg.header.frame_id = "map";
+            copied_msg.header.seq = seq_id_;
             mask_pub_.publish(copied_msg);
             return;
         }
@@ -547,6 +552,9 @@ private:
 
         // Publish the copied message
         copied_msg.header.stamp = ros::Time::now();
+        copied_msg.header.frame_id = "map";
+        copied_msg.header.seq = seq_id_;
+        
         for(size_t i = 0; i < masks.size(); ++i){
             copied_msg.objects[i].track_id = track_ids_masks[i];
         }
@@ -635,6 +643,8 @@ private:
 
         next_tracking_id_ = 1; //Start from 1. CHG
         matched_points_ready_ = false;
+
+        seq_id_ = 0;
 
         // Set a random color map for visualization
         for(int i=0; i<256; ++i){
