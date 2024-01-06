@@ -26,8 +26,8 @@ class InstanceSegmentation:
         # current_directory = os.path.dirname(script_path)
         # checkpoint = current_directory + '/../model/mask2former_r50_lsj_8x2_50e_coco_20220506_191028-8e96e88b.pth'
 
-        config = '/home/clarence/git/openmmlab/mmdetection/configs/mask2former/mask2former_r50_lsj_8x2_50e_coco.py'
-        checkpoint = '/home/clarence/git/openmmlab/mmdetection/mymodels/mask2former/ins_resnet_50/mask2former_r50_lsj_8x2_50e_coco_20220506_191028-8e96e88b.pth'
+        config = '/home/cc/git/mmdetection/configs/mask2former/mask2former_r50_lsj_8x2_50e_coco.py'
+        checkpoint = '/home/cc/chg_ws/ros_ws/semantic_map_ws/src/single_camera_tracking/model/mask2former_r50_lsj_8x2_50e_coco_20220506_191028-8e96e88b.pth'
 
         # Set the device to be used for evaluation
         device='cuda:0'

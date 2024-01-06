@@ -9,3 +9,6 @@ points_too_close_threshold: 0.5
 min_vote_number_threshold: 3
 min_iou_threshold: 0.4
 min_bbox_size_threshold: 2000.0
+
+scene_name: Scene01
+dataset_path: /home/cc/chg_ws/ros_ws/semantic_map_ws/src/data_reader_evaluator/data/virtual_kitti_2_simplified

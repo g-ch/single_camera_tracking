@@ -32,7 +32,8 @@
 #include <sensor_msgs/PointCloud2.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <yaml-cpp/yaml.h>
-
+#include <iomanip>
+#include "data_base.h"
 
 // define camera intrinsic parameters.
 float c_camera_fx = 725.0087f; ///< Focal length in x direction. Unit: pixel
@@ -47,6 +48,8 @@ int c_vote_number_threshold = 3;
 float c_iou_threshold = 0.5f;
 double c_bbox_size_threshold = 1000.0; // minimum size of bounding box to track
 
+std::string scene_name = "Scene01";
+std::string dataset_path = "";
 
 class BoundingBox{
 public:
@@ -550,14 +553,51 @@ private:
         key_points_msg.header.frame_id = "map";
         key_points_pub_.publish(key_points_msg);
 
-        // Publish the copied message
+        // Set the copied message
         copied_msg.header.stamp = ros::Time::now();
         copied_msg.header.frame_id = "map";
         copied_msg.header.seq = seq_id_;
         
         for(size_t i = 0; i < masks.size(); ++i){
             copied_msg.objects[i].track_id = track_ids_masks[i];
+            copied_msg.objects[i].label = "Car";
         }
+
+        // Add a static semantic mask for the copied msg. The name of the mask is "classmmseg_"+ five digit number.
+        std::ostringstream oss;
+        oss << std::setw(5) << std::setfill('0') << seq_id_;
+        std::string semantic_mask_path = dataset_path + "/vkitti_2.0.3_rgb/" + scene_name + "/clone/frames/rgb/Camera_0/classmmseg_" + oss.str() + ".png";
+        // Read the image as a 8UC3 image
+        cv::Mat semantic_mask = cv::imread(semantic_mask_path, cv::IMREAD_COLOR);
+        // Create a 8UC1 mask filled with labels
+        cv::Mat semantic_mask_mono = cv::Mat::zeros(semantic_mask.rows, semantic_mask.cols, CV_8UC1);
+        for(int i = 0; i < semantic_mask.rows; ++i){
+            for(int j = 0; j < semantic_mask.cols; ++j){
+                cv::Vec3b color = semantic_mask.at<cv::Vec3b>(i, j);
+                // Check the label_id in label_color_map_default
+                int label_id = 0;
+                for(const auto &label_color : label_color_map_default){
+                    if(color == label_color.second){
+                        label_id = label_color.first;
+                        break;
+                    }
+                }
+
+                // Consider only the vegetation class because it is the only class that can match the Virtual KITTI 2 dataset.
+                if(label_id == label_id_map_default["Vegetation"]){
+                    semantic_mask_mono.at<uchar>(i, j) = label_id;
+                }
+            }
+        }
+
+        mask_kpts_msgs::MaskKpts mask_kpts_msg;
+        mask_kpts_msg.track_id = 65535;
+        mask_kpts_msg.label = "static";
+        cv_bridge::CvImage mask_cv_image(std_msgs::Header(), "mono8", semantic_mask_mono);
+        mask_kpts_msg.mask = *(mask_cv_image.toImageMsg());
+        copied_msg.objects.push_back(mask_kpts_msg);
+
+        // Publish the message
         mask_pub_.publish(copied_msg);
 
         // Show the result in a single image
@@ -699,6 +739,8 @@ int main(int argc, char** argv){
     c_vote_number_threshold = config["min_vote_number_threshold"].as<int>();
     c_iou_threshold = config["min_iou_threshold"].as<float>();
     c_bbox_size_threshold = config["min_bbox_size_threshold"].as<double>();
+    scene_name = config["scene_name"].as<std::string>();
+    dataset_path = config["dataset_path"].as<std::string>();
 
     std::cout << "c_camera_fx = " << c_camera_fx << ", " << "c_camera_fy = " << c_camera_fy << ", " << "c_camera_cx = " << c_camera_cx << ", " << "c_camera_cy = " << c_camera_cy << std::endl;
     std::cout << "points_too_far_threshold = " << points_too_far_threshold << ", " << "points_too_close_threshold = " << points_too_close_threshold << std::endl;
