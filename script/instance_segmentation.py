@@ -38,7 +38,7 @@ class InstanceSegmentation:
         self.concerned_labels = [2, 5, 7] # 2: car 5: bus 7: truck
 
         # Set the image subscriber
-        self.image_sub = rospy.Subscriber("/camera_rgb_image", Image, self.image_callback)
+        self.image_sub = rospy.Subscriber("/coda/cam3/rgb", Image, self.image_callback)
         self.mask_pub = rospy.Publisher("/mask_group", MaskGroup, queue_size=1)
 
         # Set the bridge
@@ -171,7 +171,7 @@ class InstanceSegmentation:
     def image_callback(self, msg):
         # Convert the image to OpenCV format
         try:
-            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
+            cv_image = self.bridge.imgmsg_to_cv2(msg) #desired_encoding="bgr8"
         except CvBridgeError as e:
             print(e)
 

@@ -36,12 +36,22 @@
 #include "data_base.h"
 
 // define camera intrinsic parameters.
-float c_camera_fx = 725.0087f; ///< Focal length in x direction. Unit: pixel
-float c_camera_fy = 725.0087f; ///< Focal length in y direction. Unit: pixel
-float c_camera_cx = 620.5f; ///< Principal point in x direction. Unit: pixel
-float c_camera_cy = 187.f; ///< Principal point in y direction. Unit: pixel
+// float c_camera_fx = 725.0087f; ///< Focal length in x direction. Unit: pixel
+// float c_camera_fy = 725.0087f; ///< Focal length in y direction. Unit: pixel
+// float c_camera_cx = 620.5f; ///< Principal point in x direction. Unit: pixel
+// float c_camera_cy = 187.f; ///< Principal point in y direction. Unit: pixel
 
-float points_too_far_threshold = 30.f; ///< Threshold to remove points that are too far away from the camera. Unit: meter
+//   data:   [ 569.8286,   -9.1121,          439.2660,
+//           0,        565.4818,     360.5810,
+//           0,        0,          1   ]
+
+float c_camera_fx = 569.8286f; ///< Focal length in x direction. Unit: pixel
+float c_camera_fy = 565.4818f; ///< Focal length in y direction. Unit: pixel
+float c_camera_cx = 439.2660f; ///< Principal point in x direction. Unit: pixel
+float c_camera_cy = 360.5810f; ///< Principal point in y direction. Unit: pixel
+
+
+float points_too_far_threshold = 20.f; ///< Threshold to remove points that are too far away from the camera. Unit: meter
 float points_too_close_threshold = 0.5f; ///< Threshold to remove points that are too close to the camera. Unit: meter
 
 int c_vote_number_threshold = 3;
@@ -142,7 +152,7 @@ private:
     void imageCallback(const sensor_msgs::ImageConstPtr& rgb_msg, const sensor_msgs::ImageConstPtr& depth_msg, const geometry_msgs::PoseStampedConstPtr& camera_pose_msg){
         cv_bridge::CvImagePtr cv_ptr, cv_ptr_depth;
         try{
-            cv_ptr = cv_bridge::toCvCopy(rgb_msg, sensor_msgs::image_encodings::RGB8);
+            cv_ptr = cv_bridge::toCvCopy(rgb_msg); //sensor_msgs::image_encodings::RGB8
             cv_ptr_depth = cv_bridge::toCvCopy(depth_msg, sensor_msgs::image_encodings::TYPE_32FC1);
 
             seq_id_ = rgb_msg->header.seq;
@@ -162,6 +172,27 @@ private:
         // Get image
         cv::Mat img = cv_ptr->image;
         depth_img_curr_ = cv_ptr_depth->image;
+
+        // Count 0 and nan in the depth image before converting it to float
+        // int zero_count = 0;
+        // int nan_count = 0;
+        // for(int i = 0; i < cv_ptr_depth->image.rows; ++i){
+        //     for(int j = 0; j < cv_ptr_depth->image.cols; ++j){
+        //         if(cv_ptr_depth->image.at<uint16_t>(i, j) == 0){
+        //             zero_count ++;
+        //         }
+        //         if(std::isnan(cv_ptr_depth->image.at<uint16_t>(i, j))){
+        //             nan_count ++;
+        //         }
+        //     }
+        // }
+        // std::cout << "zero_count = " << zero_count << ", nan_count = " << nan_count << std::endl;
+
+        // Result: No nan. Too far or invalid depth points are all 0.
+
+        // Convert depth image to float
+        // cv_ptr_depth->image.convertTo(depth_img_curr_, CV_32F); // Convert to meter
+
 
         // Convert RGB to grayscale and do inference
         cv::cvtColor(img, img, cv::COLOR_RGB2GRAY);
@@ -381,6 +412,10 @@ private:
         cv::Mat invalid_depth_mask = cv::Mat::zeros(depth_img_curr_.rows, depth_img_curr_.cols, CV_8U);
         for(int i = 0; i < depth_img_curr_.rows; ++i){
             for(int j = 0; j < depth_img_curr_.cols; ++j){
+                // if(depth_img_curr_.at<float>(i, j) > 0.01){
+                //     std::cout << depth_img_curr_.at<float>(i, j) << ", ";
+                // }
+
                 if(depth_img_curr_.at<float>(i, j) > points_too_far_threshold || depth_img_curr_.at<float>(i, j) < points_too_close_threshold){
                     invalid_depth_mask.at<uchar>(i, j) = 255;
                 }
@@ -388,8 +423,8 @@ private:
         }
 
         // Dilate the invalid depth mask
-        cv::Mat element = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
-        cv::dilate(invalid_depth_mask, invalid_depth_mask, element);
+        // cv::Mat element = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
+        // cv::dilate(invalid_depth_mask, invalid_depth_mask, element);
 
         cv::imshow("invalid_depth_mask tracking", invalid_depth_mask);
 
@@ -474,8 +509,8 @@ private:
                         key_points.push_back(p_last);
 
                         // Show kpt_curr and kpt_last
-                        // std::cout << "kpt_curr = " << kpt_curr.x << ", " << kpt_curr.y << ", " << kpt_curr.z << std::endl;
-                        // std::cout << "kpt_last = " << kpt_last.x << ", " << kpt_last.y << ", " << kpt_last.z << std::endl;
+                        std::cout << "kpt_curr = " << kpt_curr.x << ", " << kpt_curr.y << ", " << kpt_curr.z << std::endl;
+                        std::cout << "kpt_last = " << kpt_last.x << ", " << kpt_last.y << ", " << kpt_last.z << std::endl;
 
                         break;  // Breaking the loop as one point can only have one match.
                     }
@@ -660,9 +695,9 @@ private:
         //raw_image_sub_ = nh_.subscribe("/camera_rgb_image", 1, &TrackingNode::imageCallback, this);
         
         // Subscribe to camera_rgb_image, camera_depth_image and camera pose synchronously
-        message_filters::Subscriber<sensor_msgs::Image> rgb_image_sub(nh_, "/camera_rgb_image", 1);
-        message_filters::Subscriber<sensor_msgs::Image> depth_image_sub(nh_, "/camera_depth_image", 1);
-        message_filters::Subscriber<geometry_msgs::PoseStamped> camera_pose_sub(nh_, "/camera_pose", 1);
+        message_filters::Subscriber<sensor_msgs::Image> rgb_image_sub(nh_, "/coda/cam3/rgb", 1);
+        message_filters::Subscriber<sensor_msgs::Image> depth_image_sub(nh_, "/coda/cam3/depth", 1);
+        message_filters::Subscriber<geometry_msgs::PoseStamped> camera_pose_sub(nh_, "/coda/pose_cam3_rotated", 1);
         typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Image, geometry_msgs::PoseStamped> MySyncPolicy;
         message_filters::Synchronizer<MySyncPolicy> sync(MySyncPolicy(10), rgb_image_sub, depth_image_sub, camera_pose_sub);
         sync.registerCallback(boost::bind(&TrackingNode::imageCallback, this, _1, _2, _3));
