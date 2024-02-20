@@ -7,6 +7,6 @@ min_bbox_size_threshold: 2000.0
 min_iou_threshold: 0.3
 min_vote_number_threshold: 3
 points_too_close_threshold: 0.5
-points_too_far_threshold: 30.0
+points_too_far_threshold: 20.0
 scene_name: Scene01
 

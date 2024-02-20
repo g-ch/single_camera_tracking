@@ -173,27 +173,6 @@ private:
         cv::Mat img = cv_ptr->image;
         depth_img_curr_ = cv_ptr_depth->image;
 
-        // Count 0 and nan in the depth image before converting it to float
-        // int zero_count = 0;
-        // int nan_count = 0;
-        // for(int i = 0; i < cv_ptr_depth->image.rows; ++i){
-        //     for(int j = 0; j < cv_ptr_depth->image.cols; ++j){
-        //         if(cv_ptr_depth->image.at<uint16_t>(i, j) == 0){
-        //             zero_count ++;
-        //         }
-        //         if(std::isnan(cv_ptr_depth->image.at<uint16_t>(i, j))){
-        //             nan_count ++;
-        //         }
-        //     }
-        // }
-        // std::cout << "zero_count = " << zero_count << ", nan_count = " << nan_count << std::endl;
-
-        // Result: No nan. Too far or invalid depth points are all 0.
-
-        // Convert depth image to float
-        // cv_ptr_depth->image.convertTo(depth_img_curr_, CV_32F); // Convert to meter
-
-
         // Convert RGB to grayscale and do inference
         cv::cvtColor(img, img, cv::COLOR_RGB2GRAY);
         superglueInference(img);
@@ -412,9 +391,6 @@ private:
         cv::Mat invalid_depth_mask = cv::Mat::zeros(depth_img_curr_.rows, depth_img_curr_.cols, CV_8U);
         for(int i = 0; i < depth_img_curr_.rows; ++i){
             for(int j = 0; j < depth_img_curr_.cols; ++j){
-                // if(depth_img_curr_.at<float>(i, j) > 0.01){
-                //     std::cout << depth_img_curr_.at<float>(i, j) << ", ";
-                // }
 
                 if(depth_img_curr_.at<float>(i, j) > points_too_far_threshold || depth_img_curr_.at<float>(i, j) < points_too_close_threshold){
                     invalid_depth_mask.at<uchar>(i, j) = 255;
@@ -599,38 +575,38 @@ private:
         }
 
         // Add a static semantic mask for the copied msg. The name of the mask is "classmmseg_"+ five digit number.
-        std::ostringstream oss;
-        oss << std::setw(5) << std::setfill('0') << seq_id_;
-        std::string semantic_mask_path = dataset_path + "/vkitti_2.0.3_rgb/" + scene_name + "/clone/frames/rgb/Camera_0/classmmseg_" + oss.str() + ".png";
-        // Read the image as a 8UC3 image
-        cv::Mat semantic_mask = cv::imread(semantic_mask_path, cv::IMREAD_COLOR);
-        // Create a 8UC1 mask filled with labels
-        cv::Mat semantic_mask_mono = cv::Mat::zeros(semantic_mask.rows, semantic_mask.cols, CV_8UC1);
-        for(int i = 0; i < semantic_mask.rows; ++i){
-            for(int j = 0; j < semantic_mask.cols; ++j){
-                cv::Vec3b color = semantic_mask.at<cv::Vec3b>(i, j);
-                // Check the label_id in label_color_map_default
-                int label_id = 0;
-                for(const auto &label_color : label_color_map_default){
-                    if(color == label_color.second){
-                        label_id = label_color.first;
-                        break;
-                    }
-                }
+        // std::ostringstream oss;
+        // oss << std::setw(5) << std::setfill('0') << seq_id_;
+        // std::string semantic_mask_path = dataset_path + "/vkitti_2.0.3_rgb/" + scene_name + "/clone/frames/rgb/Camera_0/classmmseg_" + oss.str() + ".png";
+        // // Read the image as a 8UC3 image
+        // cv::Mat semantic_mask = cv::imread(semantic_mask_path, cv::IMREAD_COLOR);
+        // // Create a 8UC1 mask filled with labels
+        // cv::Mat semantic_mask_mono = cv::Mat::zeros(semantic_mask.rows, semantic_mask.cols, CV_8UC1);
+        // for(int i = 0; i < semantic_mask.rows; ++i){
+        //     for(int j = 0; j < semantic_mask.cols; ++j){
+        //         cv::Vec3b color = semantic_mask.at<cv::Vec3b>(i, j);
+        //         // Check the label_id in label_color_map_default
+        //         int label_id = 0;
+        //         for(const auto &label_color : label_color_map_default){
+        //             if(color == label_color.second){
+        //                 label_id = label_color.first;
+        //                 break;
+        //             }
+        //         }
 
-                // Consider only the vegetation class because it is the only class that can match the Virtual KITTI 2 dataset.
-                if(label_id == label_id_map_default["Vegetation"]){
-                    semantic_mask_mono.at<uchar>(i, j) = label_id;
-                }
-            }
-        }
+        //         // Consider only the vegetation class because it is the only class that can match the Virtual KITTI 2 dataset.
+        //         if(label_id == label_id_map_default["Vegetation"]){
+        //             semantic_mask_mono.at<uchar>(i, j) = label_id;
+        //         }
+        //     }
+        // }
 
-        mask_kpts_msgs::MaskKpts mask_kpts_msg;
-        mask_kpts_msg.track_id = 65535;
-        mask_kpts_msg.label = "static";
-        cv_bridge::CvImage mask_cv_image(std_msgs::Header(), "mono8", semantic_mask_mono);
-        mask_kpts_msg.mask = *(mask_cv_image.toImageMsg());
-        copied_msg.objects.push_back(mask_kpts_msg);
+        // mask_kpts_msgs::MaskKpts mask_kpts_msg;
+        // mask_kpts_msg.track_id = 65535;
+        // mask_kpts_msg.label = "static";
+        // cv_bridge::CvImage mask_cv_image(std_msgs::Header(), "mono8", semantic_mask_mono);
+        // mask_kpts_msg.mask = *(mask_cv_image.toImageMsg());
+        // copied_msg.objects.push_back(mask_kpts_msg);
 
         // Publish the message
         mask_pub_.publish(copied_msg);

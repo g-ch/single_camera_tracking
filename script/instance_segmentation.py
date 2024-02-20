@@ -37,6 +37,16 @@ class InstanceSegmentation:
         self.confidence_threshold = 0.8
         self.concerned_labels = [2, 5, 7] # 2: car 5: bus 7: truck
 
+
+        # Run test with an black image, to avoid the first time slow
+        time_start = time.time()
+        cv_image = np.zeros([480, 640, 3], dtype=np.uint8)
+        result = self.inference(cv_image, show=False)
+        self.result2mask(cv_image, result, show_result=False, publish_result=False)
+        time_end = time.time()
+        print("Inference time (ms) = ", (time_end - time_start) * 1000)
+
+
         # Set the image subscriber
         self.image_sub = rospy.Subscriber("/coda/cam3/rgb", Image, self.image_callback)
         self.mask_pub = rospy.Publisher("/mask_group", MaskGroup, queue_size=1)
@@ -79,8 +89,25 @@ class InstanceSegmentation:
     def visualize(self, img, result):
         # Show the results
         show_result_pyplot(self.model, img, result, score_thr=0.3)
+    
 
-    def result2mask(self, cv_image, result, show_result=True):
+    def computeIou(self, bbox1, bbox2):
+        # Compute the intersection over union of two bboxes
+        x1 = max(bbox1[0], bbox2[0])
+        y1 = max(bbox1[1], bbox2[1])
+        x2 = min(bbox1[2], bbox2[2])
+        y2 = min(bbox1[3], bbox2[3])
+
+        intersection = max(0, x2 - x1) * max(0, y2 - y1)
+        area1 = (bbox1[2] - bbox1[0]) * (bbox1[3] - bbox1[1])
+        area2 = (bbox2[2] - bbox2[0]) * (bbox2[3] - bbox2[1])
+
+        iou = intersection / (area1 + area2 - intersection)
+
+        return iou
+
+
+    def result2mask(self, cv_image, result, show_result=True, publish_result=True):
         # Process the results
         assert isinstance(result, tuple)
         bbox_result, mask_result = result
@@ -125,6 +152,17 @@ class InstanceSegmentation:
             if labels[idx] in self.concerned_labels:
                 concerned_labels_idx_array.append(idx)
 
+        # Merge the instances that have big overlap
+        if len(concerned_labels_idx_array) > 1:
+            for idx1 in concerned_labels_idx_array:
+                for idx2 in concerned_labels_idx_array:
+                    # If the two bboxes are not the same and have the same label
+                    if idx1 != idx2 and labels[idx1] == labels[idx2]:
+                        iou = self.computeIou(bboxes[idx1, :4], bboxes[idx2, :4])
+                        if iou > 0.8:
+                            concerned_labels_idx_array.remove(idx2)
+
+
         # Change the True/False values in the masks to 1/0
         masks = masks.astype(np.uint8)
 
@@ -152,21 +190,22 @@ class InstanceSegmentation:
             cv2.waitKey(1)
 
         # Publish the results
-        mask_group = MaskGroup()
-        # print("high confidence idx num = ", len(high_confidence_idx_array))
-        for idx in concerned_labels_idx_array:
-            this_mask = MaskKpts()
-            this_mask.bbox_tl.x = bboxes[idx, 0]
-            this_mask.bbox_tl.y = bboxes[idx, 1]
-            this_mask.bbox_br.x = bboxes[idx, 2]
-            this_mask.bbox_br.y = bboxes[idx, 3]
-            this_mask.label = str(labels[idx])
-            this_mask.mask = self.bridge.cv2_to_imgmsg(masks[idx, :, :], encoding="mono8")
-            mask_group.header.stamp = rospy.Time.now()
-            mask_group.header.frame_id = self.frame_id
-            mask_group.objects.append(this_mask)
-        
-        self.mask_pub.publish(mask_group)
+        if publish_result:
+            mask_group = MaskGroup()
+            # print("high confidence idx num = ", len(high_confidence_idx_array))
+            for idx in concerned_labels_idx_array:
+                this_mask = MaskKpts()
+                this_mask.bbox_tl.x = bboxes[idx, 0]
+                this_mask.bbox_tl.y = bboxes[idx, 1]
+                this_mask.bbox_br.x = bboxes[idx, 2]
+                this_mask.bbox_br.y = bboxes[idx, 3]
+                this_mask.label = str(labels[idx])
+                this_mask.mask = self.bridge.cv2_to_imgmsg(masks[idx, :, :], encoding="mono8")
+                mask_group.header.stamp = rospy.Time.now()
+                mask_group.header.frame_id = self.frame_id
+                mask_group.objects.append(this_mask)
+            
+            self.mask_pub.publish(mask_group)
 
     def image_callback(self, msg):
         # Convert the image to OpenCV format
