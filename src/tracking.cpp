@@ -45,10 +45,13 @@
 //           0,        565.4818,     360.5810,
 //           0,        0,          1   ]
 
-float c_camera_fx = 569.8286f; ///< Focal length in x direction. Unit: pixel
-float c_camera_fy = 565.4818f; ///< Focal length in y direction. Unit: pixel
-float c_camera_cx = 439.2660f; ///< Principal point in x direction. Unit: pixel
-float c_camera_cy = 360.5810f; ///< Principal point in y direction. Unit: pixel
+// float c_camera_fx = 569.8286f; ///< Focal length in x direction. Unit: pixel
+// float c_camera_fy = 565.4818f; ///< Focal length in y direction. Unit: pixel
+// float c_camera_cx = 439.2660f; ///< Principal point in x direction. Unit: pixel
+// float c_camera_cy = 360.5810f; ///< Principal point in y direction. Unit: pixel
+
+Eigen::Matrix3d camera_intrinsic_matrix = Eigen::Matrix3d::Identity();
+Eigen::Matrix3d camera_intrinsic_matrix_inv = Eigen::Matrix3d::Identity();
 
 
 float points_too_far_threshold = 20.f; ///< Threshold to remove points that are too far away from the camera. Unit: meter
@@ -110,6 +113,7 @@ private:
     ros::NodeHandle nh_;
     ros::Subscriber raw_image_sub_, segmentation_result_sub_, camera_pose_sub_;
     ros::Publisher image_pub_, mask_pub_, key_points_pub_;
+    ros::Publisher original_point_cloud_pub_;
 
     std::shared_ptr<SuperPoint> superpoint_;
     std::shared_ptr<SuperGlue> superglue_;
@@ -181,6 +185,30 @@ private:
         auto end = std::chrono::high_resolution_clock::now();
         double duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
         std::cout << "Inference cost " << duration / 1000 << " MS" << std::endl;
+
+        // Publish the original PointCloud for visualization
+        pcl::PointCloud<pcl::PointXYZRGB> original_point_cloud;
+        for(int i = 0; i < cv_ptr_depth->image.rows; ++i){
+            for(int j = 0; j < cv_ptr_depth->image.cols; ++j){
+                pcl::PointXYZRGB point;
+                Eigen::Vector3d pixel_position(j, i, 1);
+                Eigen::Vector3d p = camera_intrinsic_matrix_inv * pixel_position * cv_ptr_depth->image.at<float>(i, j);
+                p = camera_orientation_curr_.toRotationMatrix() * p + camera_position_curr_; // Transform the point to the global coordinate
+                point.x = p[0];
+                point.y = p[1];
+                point.z = p[2];
+                point.r = cv_ptr->image.at<cv::Vec3b>(i, j)[2];
+                point.g = cv_ptr->image.at<cv::Vec3b>(i, j)[1];
+                point.b = cv_ptr->image.at<cv::Vec3b>(i, j)[0];
+                original_point_cloud.push_back(point);
+            }
+        }
+        sensor_msgs::PointCloud2 original_point_cloud_msg;
+        pcl::toROSMsg(original_point_cloud, original_point_cloud_msg);
+        original_point_cloud_msg.header.stamp = ros::Time::now();
+        original_point_cloud_msg.header.frame_id = "map";
+        original_point_cloud_pub_.publish(original_point_cloud_msg);
+
     }
 
 
@@ -448,18 +476,15 @@ private:
 
                         // Storing matched keypoints for each mask. Use depth um image and camera intrinsic parameters to calculate the 3D position of the keypoints.
                         Eigen::Vector3d p_curr_global, p_last_global;
-                        p_curr_global[0] = keypoints_curr_ori_img_[i].pt.x;
-                        p_curr_global[1] = keypoints_curr_ori_img_[i].pt.y;
-                        p_curr_global[2] = depth_img_curr_.at<float>(p_curr_global[1], p_curr_global[0]);
-                        p_curr_global[0] = (p_curr_global[0] - c_camera_cx) * p_curr_global[2] / c_camera_fx;
-                        p_curr_global[1] = (p_curr_global[1] - c_camera_cy) * p_curr_global[2] / c_camera_fy;
+
+                        // Use camera_intrinsic_matrix to calculate the 3D position of the keypoints.
+                        Eigen::Vector3d pixel_position_current(keypoints_curr_ori_img_[i].pt.x, keypoints_curr_ori_img_[i].pt.y, 1);
+                        p_curr_global = camera_intrinsic_matrix_inv * pixel_position_current * depth_img_curr_.at<float>(keypoints_curr_ori_img_[i].pt.y, keypoints_curr_ori_img_[i].pt.x);
                         p_curr_global = camera_orientation_matrix_curr_ * p_curr_global + camera_position_curr_;
 
-                        p_last_global[0] = keypoints_last_ori_img_[j].pt.x;
-                        p_last_global[1] = keypoints_last_ori_img_[j].pt.y;
-                        p_last_global[2] = depth_img_last_.at<float>(p_last_global[1], p_last_global[0]);
-                        p_last_global[0] = (p_last_global[0] - c_camera_cx) * p_last_global[2] / c_camera_fx;
-                        p_last_global[1] = (p_last_global[1] - c_camera_cy) * p_last_global[2] / c_camera_fy;
+
+                        Eigen::Vector3d pixel_position_last(keypoints_last_ori_img_[j].pt.x, keypoints_last_ori_img_[j].pt.y, 1);
+                        p_last_global = camera_intrinsic_matrix_inv * pixel_position_last * depth_img_last_.at<float>(keypoints_last_ori_img_[j].pt.y, keypoints_last_ori_img_[j].pt.x);
                         p_last_global = camera_orientation_matrix_last_ * p_last_global + camera_position_last_;
 
                         // Add the matched keypoints to the message to be published for map building
@@ -692,6 +717,9 @@ private:
         mask_pub_ = nh_.advertise<mask_kpts_msgs::MaskGroup>("/mask_group_super_glued", 1);
         key_points_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("/key_points", 1);
 
+        original_point_cloud_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("/original_point_cloud", 1);
+
+
         std::string package_path = ros::package::getPath("single_camera_tracking");
         std::string config_path = package_path + "/SuperPoint-SuperGlue-TensorRT/config/config.yaml";
         std::string model_dir = package_path + "/SuperPoint-SuperGlue-TensorRT/weights/";
@@ -704,6 +732,12 @@ private:
         matched_points_ready_ = false;
 
         seq_id_ = 0;
+
+        camera_intrinsic_matrix << 569.8286, -9.1121, 439.2660,
+                                  0, 565.4818, 360.5810,
+                                  0, 0, 1;
+
+        camera_intrinsic_matrix_inv = camera_intrinsic_matrix.inverse().eval();
 
         // Set a random color map for visualization
         for(int i=0; i<256; ++i){
@@ -749,10 +783,10 @@ int main(int argc, char** argv){
     std::string config_path = package_path + "/cfg/settings.yaml";
 
     YAML::Node config = YAML::LoadFile(config_path);
-    c_camera_fx = config["camera_fx"].as<float>();
-    c_camera_fy = config["camera_fy"].as<float>();
-    c_camera_cx = config["camera_cx"].as<float>();
-    c_camera_cy = config["camera_cy"].as<float>();
+    // c_camera_fx = config["camera_fx"].as<float>();
+    // c_camera_fy = config["camera_fy"].as<float>();
+    // c_camera_cx = config["camera_cx"].as<float>();
+    // c_camera_cy = config["camera_cy"].as<float>();
     points_too_far_threshold = config["points_too_far_threshold"].as<float>();
     points_too_close_threshold = config["points_too_close_threshold"].as<float>();
     c_vote_number_threshold = config["min_vote_number_threshold"].as<int>();
@@ -761,7 +795,7 @@ int main(int argc, char** argv){
     scene_name = config["scene_name"].as<std::string>();
     dataset_path = config["dataset_path"].as<std::string>();
 
-    std::cout << "c_camera_fx = " << c_camera_fx << ", " << "c_camera_fy = " << c_camera_fy << ", " << "c_camera_cx = " << c_camera_cx << ", " << "c_camera_cy = " << c_camera_cy << std::endl;
+    // std::cout << "c_camera_fx = " << c_camera_fx << ", " << "c_camera_fy = " << c_camera_fy << ", " << "c_camera_cx = " << c_camera_cx << ", " << "c_camera_cy = " << c_camera_cy << std::endl;
     std::cout << "points_too_far_threshold = " << points_too_far_threshold << ", " << "points_too_close_threshold = " << points_too_close_threshold << std::endl;
     std::cout << "c_vote_number_threshold = " << c_vote_number_threshold << ", " << "c_iou_threshold = " << c_iou_threshold << ", " << "c_bbox_size_threshold = " << c_bbox_size_threshold << std::endl;
 

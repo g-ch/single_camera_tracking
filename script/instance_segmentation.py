@@ -35,7 +35,7 @@ class InstanceSegmentation:
 
         # Set the confidence threshold
         self.confidence_threshold = 0.8
-        self.concerned_labels = [2, 5, 7] # 2: car 5: bus 7: truck
+        self.concerned_labels = [0, 2, 5, 7] # 2: car 5: bus 7: truck 0: person
 
 
         # Run test with an black image, to avoid the first time slow
@@ -150,6 +150,11 @@ class InstanceSegmentation:
         concerned_labels_idx_array = []
         for idx in high_confidence_idx_array:
             if labels[idx] in self.concerned_labels:
+
+                # Turn person to car. for test
+                if labels[idx] == 0:
+                    labels[idx] = 2
+
                 concerned_labels_idx_array.append(idx)
 
         # Merge the instances that have big overlap
