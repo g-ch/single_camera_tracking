@@ -391,12 +391,22 @@ private:
         cv::Mat invalid_depth_mask = cv::Mat::zeros(depth_img_curr_.rows, depth_img_curr_.cols, CV_8U);
         for(int i = 0; i < depth_img_curr_.rows; ++i){
             for(int j = 0; j < depth_img_curr_.cols; ++j){
-
                 if(depth_img_curr_.at<float>(i, j) > points_too_far_threshold || depth_img_curr_.at<float>(i, j) < points_too_close_threshold){
                     invalid_depth_mask.at<uchar>(i, j) = 255;
                 }
             }
         }
+
+        // Make a mask for invalid depth points in the last frame
+        cv::Mat invalid_depth_mask_last = cv::Mat::zeros(depth_img_last_.rows, depth_img_last_.cols, CV_8U);
+        for(int i = 0; i < depth_img_last_.rows; ++i){
+            for(int j = 0; j < depth_img_last_.cols; ++j){
+                if(depth_img_last_.at<float>(i, j) > points_too_far_threshold || depth_img_last_.at<float>(i, j) < points_too_close_threshold){
+                    invalid_depth_mask_last.at<uchar>(i, j) = 255;
+                }
+            }
+        }
+
 
         // Dilate the invalid depth mask
         // cv::Mat element = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
@@ -428,6 +438,14 @@ private:
                             id_votes[tracking_id]++;
                         }
 
+                        // Check if the point is too close or too far to the camera using the depth mask. If so, don't use it for t_matrix estimation.
+                        if(invalid_depth_mask.at<uchar>(keypoints_curr_ori_img_[i].pt.y, keypoints_curr_ori_img_[i].pt.x) > 0){
+                            continue;
+                        }
+                        if(invalid_depth_mask_last.at<uchar>(keypoints_last_ori_img_[j].pt.y, keypoints_last_ori_img_[j].pt.x) > 0){
+                            continue;
+                        }
+
                         // Storing matched keypoints for each mask. Use depth um image and camera intrinsic parameters to calculate the 3D position of the keypoints.
                         Eigen::Vector3d p_curr_global, p_last_global;
                         p_curr_global[0] = keypoints_curr_ori_img_[i].pt.x;
@@ -443,16 +461,6 @@ private:
                         p_last_global[0] = (p_last_global[0] - c_camera_cx) * p_last_global[2] / c_camera_fx;
                         p_last_global[1] = (p_last_global[1] - c_camera_cy) * p_last_global[2] / c_camera_fy;
                         p_last_global = camera_orientation_matrix_last_ * p_last_global + camera_position_last_;
-
-                        // // Check if the point is too far away from the camera. If so, don't use it for t_matrix estimation.
-                        // if((p_curr_global - camera_position_curr_).norm() > points_too_far_threshold || (p_last_global - camera_position_last_).norm() > points_too_far_threshold){
-                        //     continue;
-                        // }
-
-                        // Check if the point is too close or too far to the camera using the depth mask. If so, don't use it for t_matrix estimation.
-                        if(invalid_depth_mask.at<uchar>(keypoints_curr_ori_img_[i].pt.y, keypoints_curr_ori_img_[i].pt.x) > 0){
-                            continue;
-                        }
 
                         // Add the matched keypoints to the message to be published for map building
                         mask_kpts_msgs::Keypoint kpt_curr, kpt_last;
