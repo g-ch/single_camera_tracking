@@ -151,9 +151,9 @@ class InstanceSegmentation:
         for idx in high_confidence_idx_array:
             if labels[idx] in self.concerned_labels:
 
-                # Turn person to car. for test
-                if labels[idx] == 0:
-                    labels[idx] = 2
+                # # Turn person to car. for test
+                # if labels[idx] == 0:
+                #     labels[idx] = 2
 
                 concerned_labels_idx_array.append(idx)
 

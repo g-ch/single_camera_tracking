@@ -604,7 +604,13 @@ private:
         
         for(size_t i = 0; i < masks.size(); ++i){
             copied_msg.objects[i].track_id = track_ids_masks[i];
-            copied_msg.objects[i].label = "Car";
+
+            if(copied_msg.objects[i].label == "0"){
+                copied_msg.objects[i].label = "Person";
+            }else{
+                copied_msg.objects[i].label = "Car";
+            }
+            std::cout << "Object label = " << copied_msg.objects[i].label << std::endl;
         }
 
         // Add a static semantic mask for the copied msg. The name of the mask is "classmmseg_"+ five digit number.
@@ -706,7 +712,7 @@ private:
         // Subscribe to camera_rgb_image, camera_depth_image and camera pose synchronously
         message_filters::Subscriber<sensor_msgs::Image> rgb_image_sub(nh_, "/coda/cam3/rgb", 1);
         message_filters::Subscriber<sensor_msgs::Image> depth_image_sub(nh_, "/coda/cam3/depth", 1);
-        message_filters::Subscriber<geometry_msgs::PoseStamped> camera_pose_sub(nh_, "/coda/pose_cam3_rotated", 1);
+        message_filters::Subscriber<geometry_msgs::PoseStamped> camera_pose_sub(nh_, "/coda/pose_cam3", 1);
         typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Image, geometry_msgs::PoseStamped> MySyncPolicy;
         message_filters::Synchronizer<MySyncPolicy> sync(MySyncPolicy(10), rgb_image_sub, depth_image_sub, camera_pose_sub);
         sync.registerCallback(boost::bind(&TrackingNode::imageCallback, this, _1, _2, _3));
