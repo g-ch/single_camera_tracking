@@ -3,7 +3,7 @@
 # camera_fx: 569.8286
 # camera_fy: 565.4818
 dataset_path: /home/cc/chg_ws/ros_ws/semantic_map_ws/src/data_reader_evaluator/data/virtual_kitti_2_simplified
-min_bbox_size_threshold: 2000.0
+min_bbox_size_threshold: 2000.0  #500 
 min_iou_threshold: 0.2
 min_vote_number_threshold: 3
 points_too_close_threshold: 0.5

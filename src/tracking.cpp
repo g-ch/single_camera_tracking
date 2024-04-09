@@ -113,6 +113,7 @@ private:
     ros::NodeHandle nh_;
     ros::Subscriber raw_image_sub_, segmentation_result_sub_, camera_pose_sub_;
     ros::Publisher image_pub_, mask_pub_, key_points_pub_;
+    ros::Publisher depth_image_repub_, camera_pose_repub_;
     ros::Publisher original_point_cloud_pub_;
 
     std::shared_ptr<SuperPoint> superpoint_;
@@ -321,12 +322,30 @@ private:
         if(msg.objects.size() == 0 || !matched_points_ready_){
             std::cout << "No mask received or No matched points ready !!!!!!!!!" << std::endl;
             matched_points_ready_ = false;
+
             // Publish the original message
             mask_kpts_msgs::MaskGroup copied_msg = msg;
             copied_msg.header.stamp = ros::Time::now();
             copied_msg.header.frame_id = "map";
             copied_msg.header.seq = seq_id_;
             mask_pub_.publish(copied_msg);
+
+            // Publish depth_img_curr_
+            cv_bridge::CvImage cv_depth_image(copied_msg.header, "32FC1", depth_img_curr_);
+            depth_image_repub_.publish(cv_depth_image.toImageMsg());
+
+            // Publish camera pose
+            geometry_msgs::PoseStamped camera_pose_msg;
+            camera_pose_msg.header = copied_msg.header;
+            camera_pose_msg.pose.position.x = camera_position_curr_[0];
+            camera_pose_msg.pose.position.y = camera_position_curr_[1];
+            camera_pose_msg.pose.position.z = camera_position_curr_[2];
+            camera_pose_msg.pose.orientation.w = camera_orientation_curr_.w();
+            camera_pose_msg.pose.orientation.x = camera_orientation_curr_.x();
+            camera_pose_msg.pose.orientation.y = camera_orientation_curr_.y();
+            camera_pose_msg.pose.orientation.z = camera_orientation_curr_.z();
+            camera_pose_repub_.publish(camera_pose_msg);
+
             return;
         }
 
@@ -434,11 +453,6 @@ private:
                 }
             }
         }
-
-
-        // Dilate the invalid depth mask
-        // cv::Mat element = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
-        // cv::dilate(invalid_depth_mask, invalid_depth_mask, element);
 
         cv::imshow("invalid_depth_mask tracking", invalid_depth_mask);
 
@@ -650,6 +664,22 @@ private:
         // Publish the message
         mask_pub_.publish(copied_msg);
 
+        // Publish depth_img_curr_
+        cv_bridge::CvImage cv_depth_image(copied_msg.header, "32FC1", depth_img_curr_);
+        depth_image_repub_.publish(cv_depth_image.toImageMsg());
+
+        // Publish camera pose
+        geometry_msgs::PoseStamped camera_pose_msg;
+        camera_pose_msg.header = copied_msg.header;
+        camera_pose_msg.pose.position.x = camera_position_curr_[0];
+        camera_pose_msg.pose.position.y = camera_position_curr_[1];
+        camera_pose_msg.pose.position.z = camera_position_curr_[2];
+        camera_pose_msg.pose.orientation.w = camera_orientation_curr_.w();
+        camera_pose_msg.pose.orientation.x = camera_orientation_curr_.x();
+        camera_pose_msg.pose.orientation.y = camera_orientation_curr_.y();
+        camera_pose_msg.pose.orientation.z = camera_orientation_curr_.z();
+        camera_pose_repub_.publish(camera_pose_msg);
+
         // Show the result in a single image
         showResult(masks, bounding_boxes_curr_frame_, track_ids_masks, copied_msg);
 
@@ -723,8 +753,10 @@ private:
         mask_pub_ = nh_.advertise<mask_kpts_msgs::MaskGroup>("/mask_group_super_glued", 1);
         key_points_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("/key_points", 1);
 
-        original_point_cloud_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("/original_point_cloud", 1);
+        depth_image_repub_ = nh_.advertise<sensor_msgs::Image>("/camera/depth_repub", 1);
+        camera_pose_repub_ = nh_.advertise<geometry_msgs::PoseStamped>("/camera/pose_repub", 1);
 
+        original_point_cloud_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("/original_point_cloud", 1);
 
         std::string package_path = ros::package::getPath("single_camera_tracking");
         std::string config_path = package_path + "/SuperPoint-SuperGlue-TensorRT/config/config.yaml";
@@ -742,6 +774,10 @@ private:
         camera_intrinsic_matrix << 569.8286, -9.1121, 439.2660,
                                   0, 565.4818, 360.5810,
                                   0, 0, 1;
+
+        //  camera_intrinsic_matrix << 284.9143, -9.1121, 219.633,
+        //                           0, 282.7409, 180.2905,
+        //                           0, 0, 1;
 
         camera_intrinsic_matrix_inv = camera_intrinsic_matrix.inverse().eval();
 

@@ -51,6 +51,8 @@ class InstanceSegmentation:
         self.image_sub = rospy.Subscriber("/coda/cam3/rgb", Image, self.image_callback)
         self.mask_pub = rospy.Publisher("/mask_group", MaskGroup, queue_size=1)
 
+        self.seg_img_pub = rospy.Publisher("/seg_img", Image, queue_size=1)
+
         # Set the bridge
         self.bridge = CvBridge()
 
@@ -191,8 +193,14 @@ class InstanceSegmentation:
             # Show the RGB image
             overlayed_mask = overlayed_mask.astype(np.uint8)
             overlayed_image = cv2.addWeighted(cv_image, 0.5, overlayed_mask, 0.5, 0)
-            cv2.imshow("overlayed_image", overlayed_image)
-            cv2.waitKey(1)
+            # cv2.imshow("overlayed_image", overlayed_image)
+            # cv2.waitKey(1)
+
+            # publish the seg image
+            seg_img_msg = self.bridge.cv2_to_imgmsg(overlayed_image, encoding="bgr8")
+            seg_img_msg.header.stamp = rospy.Time.now()
+            seg_img_msg.header.frame_id = self.frame_id
+            self.seg_img_pub.publish(seg_img_msg)
 
         # Publish the results
         if publish_result:
