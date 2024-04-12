@@ -168,15 +168,17 @@ private:
         }
 
         // Get camera pose
-        camera_position_curr_ = Eigen::Vector3d(camera_pose_msg->pose.position.x, camera_pose_msg->pose.position.y, camera_pose_msg->pose.position.z);
-        camera_orientation_curr_ = Eigen::Quaterniond(camera_pose_msg->pose.orientation.w, camera_pose_msg->pose.orientation.x, camera_pose_msg->pose.orientation.y, camera_pose_msg->pose.orientation.z);
+        // camera_position_curr_ = Eigen::Vector3d(camera_pose_msg->pose.position.x, camera_pose_msg->pose.position.y, camera_pose_msg->pose.position.z);
+        // camera_orientation_curr_ = Eigen::Quaterniond(camera_pose_msg->pose.orientation.w, camera_pose_msg->pose.orientation.x, camera_pose_msg->pose.orientation.y, camera_pose_msg->pose.orientation.z);
+        camera_orientation_curr_ = Eigen::Quaterniond(camera_pose_msg->pose.orientation.w, camera_pose_msg->pose.orientation.y, -camera_pose_msg->pose.orientation.z, camera_pose_msg->pose.orientation.x);
+        camera_position_curr_ = Eigen::Vector3d(camera_pose_msg->pose.position.y, -camera_pose_msg->pose.position.z, camera_pose_msg->pose.position.x);
 
         // Add a timer
         auto start = std::chrono::high_resolution_clock::now();
 
         // Get image
         cv::Mat img = cv_ptr->image;
-        depth_img_curr_ = cv_ptr_depth->image;
+        depth_img_curr_ = cv_ptr_depth->image / 1000.0; // Convert mm to meter
 
         // Convert RGB to grayscale and do inference
         cv::cvtColor(img, img, cv::COLOR_RGB2GRAY);
@@ -189,11 +191,12 @@ private:
 
         // Publish the original PointCloud for visualization
         pcl::PointCloud<pcl::PointXYZRGB> original_point_cloud;
-        for(int i = 0; i < cv_ptr_depth->image.rows; ++i){
-            for(int j = 0; j < cv_ptr_depth->image.cols; ++j){
+        for(int i = 0; i < depth_img_curr_.rows; ++i){
+            for(int j = 0; j < depth_img_curr_.cols; ++j){
+                // std::cout << depth_img_curr_.at<float>(i, j) <<",";
                 pcl::PointXYZRGB point;
                 Eigen::Vector3d pixel_position(j, i, 1);
-                Eigen::Vector3d p = camera_intrinsic_matrix_inv * pixel_position * cv_ptr_depth->image.at<float>(i, j);
+                Eigen::Vector3d p = camera_intrinsic_matrix_inv * pixel_position * depth_img_curr_.at<float>(i, j);
                 p = camera_orientation_curr_.toRotationMatrix() * p + camera_position_curr_; // Transform the point to the global coordinate
                 point.x = p[0];
                 point.y = p[1];
@@ -740,9 +743,9 @@ private:
         //raw_image_sub_ = nh_.subscribe("/camera_rgb_image", 1, &TrackingNode::imageCallback, this);
         
         // Subscribe to camera_rgb_image, camera_depth_image and camera pose synchronously
-        message_filters::Subscriber<sensor_msgs::Image> rgb_image_sub(nh_, "/coda/cam3/rgb", 1);
-        message_filters::Subscriber<sensor_msgs::Image> depth_image_sub(nh_, "/coda/cam3/depth", 1);
-        message_filters::Subscriber<geometry_msgs::PoseStamped> camera_pose_sub(nh_, "/coda/pose_cam3", 1);
+        message_filters::Subscriber<sensor_msgs::Image> rgb_image_sub(nh_, "/kun0/D455/camera/color/image_raw", 1);
+        message_filters::Subscriber<sensor_msgs::Image> depth_image_sub(nh_, "/kun0/D455/camera/depth/image_rect_raw", 1);
+        message_filters::Subscriber<geometry_msgs::PoseStamped> camera_pose_sub(nh_, "/kun0/mavros/local_position/pose", 1);
         typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Image, geometry_msgs::PoseStamped> MySyncPolicy;
         message_filters::Synchronizer<MySyncPolicy> sync(MySyncPolicy(10), rgb_image_sub, depth_image_sub, camera_pose_sub);
         sync.registerCallback(boost::bind(&TrackingNode::imageCallback, this, _1, _2, _3));
@@ -771,9 +774,12 @@ private:
 
         seq_id_ = 0;
 
-        camera_intrinsic_matrix << 569.8286, -9.1121, 439.2660,
-                                  0, 565.4818, 360.5810,
+        camera_intrinsic_matrix << 389.8620910644531, 0, 315.6733703613281,
+                                  0, 389.8620910644531, 240.7434844970703,
                                   0, 0, 1;
+
+        //K: [382.8045959472656, 0.0, 317.666748046875, 0.0, 381.9689636230469, 239.6370849609375, 0.0, 0.0, 1.0]
+        //K: [389.8620910644531, 0.0, 315.6733703613281, 0.0, 389.8620910644531, 240.7434844970703, 0.0, 0.0, 1.0]
 
         //  camera_intrinsic_matrix << 284.9143, -9.1121, 219.633,
         //                           0, 282.7409, 180.2905,

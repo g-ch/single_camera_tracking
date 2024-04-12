@@ -35,7 +35,7 @@ class InstanceSegmentation:
 
         # Set the confidence threshold
         self.confidence_threshold = 0.8
-        self.concerned_labels = [0, 2, 5, 7] # 2: car 5: bus 7: truck 0: person
+        self.concerned_labels = [0, 2, 5, 7, 56, 28, 33, 25] # 2: car 5: bus 7: truck 0: person 56: chair 28: suitcase 33:kite 25: umbrella
 
 
         # Run test with an black image, to avoid the first time slow
@@ -48,7 +48,7 @@ class InstanceSegmentation:
 
 
         # Set the image subscriber
-        self.image_sub = rospy.Subscriber("/coda/cam3/rgb", Image, self.image_callback)
+        self.image_sub = rospy.Subscriber("/kun0/D455/camera/color/image_raw", Image, self.image_callback)
         self.mask_pub = rospy.Publisher("/mask_group", MaskGroup, queue_size=1)
 
         self.seg_img_pub = rospy.Publisher("/seg_img", Image, queue_size=1)
@@ -152,12 +152,8 @@ class InstanceSegmentation:
         concerned_labels_idx_array = []
         for idx in high_confidence_idx_array:
             if labels[idx] in self.concerned_labels:
-
-                # # Turn person to car. for test
-                # if labels[idx] == 0:
-                #     labels[idx] = 2
-
                 concerned_labels_idx_array.append(idx)
+            #print("label = ", labels[idx])
 
         # Merge the instances that have big overlap
         if len(concerned_labels_idx_array) > 1:
@@ -193,8 +189,8 @@ class InstanceSegmentation:
             # Show the RGB image
             overlayed_mask = overlayed_mask.astype(np.uint8)
             overlayed_image = cv2.addWeighted(cv_image, 0.5, overlayed_mask, 0.5, 0)
-            # cv2.imshow("overlayed_image", overlayed_image)
-            # cv2.waitKey(1)
+            cv2.imshow("overlayed_image", overlayed_image)
+            cv2.waitKey(1)
 
             # publish the seg image
             seg_img_msg = self.bridge.cv2_to_imgmsg(overlayed_image, encoding="bgr8")
