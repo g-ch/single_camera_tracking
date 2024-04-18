@@ -48,7 +48,7 @@ class InstanceSegmentation:
 
 
         # Set the image subscriber
-        self.image_sub = rospy.Subscriber("/kun0/D455/camera/color/image_raw", Image, self.image_callback)
+        self.image_sub = rospy.Subscriber("/camera/color/image_raw_throttle", Image, self.image_callback, queue_size=1)
         self.mask_pub = rospy.Publisher("/mask_group", MaskGroup, queue_size=1)
 
         self.seg_img_pub = rospy.Publisher("/seg_img", Image, queue_size=1)

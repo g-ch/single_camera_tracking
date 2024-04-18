@@ -170,8 +170,13 @@ private:
         // Get camera pose
         // camera_position_curr_ = Eigen::Vector3d(camera_pose_msg->pose.position.x, camera_pose_msg->pose.position.y, camera_pose_msg->pose.position.z);
         // camera_orientation_curr_ = Eigen::Quaterniond(camera_pose_msg->pose.orientation.w, camera_pose_msg->pose.orientation.x, camera_pose_msg->pose.orientation.y, camera_pose_msg->pose.orientation.z);
+        
         camera_orientation_curr_ = Eigen::Quaterniond(camera_pose_msg->pose.orientation.w, camera_pose_msg->pose.orientation.y, -camera_pose_msg->pose.orientation.z, camera_pose_msg->pose.orientation.x);
         camera_position_curr_ = Eigen::Vector3d(camera_pose_msg->pose.position.y, -camera_pose_msg->pose.position.z, camera_pose_msg->pose.position.x);
+
+        // camera_orientation_curr_ = Eigen::Quaterniond(camera_pose_msg->pose.orientation.w, camera_pose_msg->pose.orientation.z, -camera_pose_msg->pose.orientation.x, camera_pose_msg->pose.orientation.y);
+        // camera_position_curr_ = Eigen::Vector3d(camera_pose_msg->pose.position.z, -camera_pose_msg->pose.position.x, camera_pose_msg->pose.position.y);
+
 
         // Add a timer
         auto start = std::chrono::high_resolution_clock::now();
@@ -437,6 +442,9 @@ private:
         Eigen::Matrix3d camera_orientation_matrix_curr_ = camera_orientation_curr_.toRotationMatrix();
         Eigen::Matrix3d camera_orientation_matrix_last_ = camera_orientation_last_.toRotationMatrix();
 
+
+        /// TODO: Make the mask only once. Last frame mask can be used for the next frame.
+
         // Make a mask for invalid depth points
         cv::Mat invalid_depth_mask = cv::Mat::zeros(depth_img_curr_.rows, depth_img_curr_.cols, CV_8U);
         for(int i = 0; i < depth_img_curr_.rows; ++i){
@@ -456,6 +464,11 @@ private:
                 }
             }
         }
+
+        // Dilate the invalid depth mask and invalid_depth_mask_last with a 10x10 kernel. The edge's depth in realsense is very noisy.
+        cv::Mat element = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(10, 10));
+        cv::dilate(invalid_depth_mask, invalid_depth_mask, element);
+        cv::dilate(invalid_depth_mask_last, invalid_depth_mask_last, element);
 
         cv::imshow("invalid_depth_mask tracking", invalid_depth_mask);
 
@@ -743,9 +756,9 @@ private:
         //raw_image_sub_ = nh_.subscribe("/camera_rgb_image", 1, &TrackingNode::imageCallback, this);
         
         // Subscribe to camera_rgb_image, camera_depth_image and camera pose synchronously
-        message_filters::Subscriber<sensor_msgs::Image> rgb_image_sub(nh_, "/kun0/D455/camera/color/image_raw", 1);
-        message_filters::Subscriber<sensor_msgs::Image> depth_image_sub(nh_, "/kun0/D455/camera/depth/image_rect_raw", 1);
-        message_filters::Subscriber<geometry_msgs::PoseStamped> camera_pose_sub(nh_, "/kun0/mavros/local_position/pose", 1);
+        message_filters::Subscriber<sensor_msgs::Image> rgb_image_sub(nh_, "/camera/color/image_raw_throttle", 1);
+        message_filters::Subscriber<sensor_msgs::Image> depth_image_sub(nh_, "/camera/aligned_depth_to_color/image_raw", 1);
+        message_filters::Subscriber<geometry_msgs::PoseStamped> camera_pose_sub(nh_, "/mavros/vision_pose/pose", 1);
         typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Image, geometry_msgs::PoseStamped> MySyncPolicy;
         message_filters::Synchronizer<MySyncPolicy> sync(MySyncPolicy(10), rgb_image_sub, depth_image_sub, camera_pose_sub);
         sync.registerCallback(boost::bind(&TrackingNode::imageCallback, this, _1, _2, _3));
@@ -774,16 +787,12 @@ private:
 
         seq_id_ = 0;
 
-        camera_intrinsic_matrix << 389.8620910644531, 0, 315.6733703613281,
-                                  0, 389.8620910644531, 240.7434844970703,
+        camera_intrinsic_matrix << 382.3886413574219, 0, 317.666748046875,
+                                  0, 381.5539245605469, 239.6370849609375,
                                   0, 0, 1;
 
-        //K: [382.8045959472656, 0.0, 317.666748046875, 0.0, 381.9689636230469, 239.6370849609375, 0.0, 0.0, 1.0]
-        //K: [389.8620910644531, 0.0, 315.6733703613281, 0.0, 389.8620910644531, 240.7434844970703, 0.0, 0.0, 1.0]
+        // 382.3886413574219, 0.0, 317.666748046875, 0.0, 381.5539245605469, 239.6370849609375, 0.0, 0.0, 1.0
 
-        //  camera_intrinsic_matrix << 284.9143, -9.1121, 219.633,
-        //                           0, 282.7409, 180.2905,
-        //                           0, 0, 1;
 
         camera_intrinsic_matrix_inv = camera_intrinsic_matrix.inverse().eval();
 
