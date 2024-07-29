@@ -36,19 +36,11 @@
 #include "data_base.h"
 
 // define camera intrinsic parameters.
-// float c_camera_fx = 725.0087f; ///< Focal length in x direction. Unit: pixel
-// float c_camera_fy = 725.0087f; ///< Focal length in y direction. Unit: pixel
-// float c_camera_cx = 620.5f; ///< Principal point in x direction. Unit: pixel
-// float c_camera_cy = 187.f; ///< Principal point in y direction. Unit: pixel
 
-//   data:   [ 569.8286,   -9.1121,          439.2660,
-//           0,        565.4818,     360.5810,
-//           0,        0,          1   ]
-
-// float c_camera_fx = 569.8286f; ///< Focal length in x direction. Unit: pixel
-// float c_camera_fy = 565.4818f; ///< Focal length in y direction. Unit: pixel
-// float c_camera_cx = 439.2660f; ///< Principal point in x direction. Unit: pixel
-// float c_camera_cy = 360.5810f; ///< Principal point in y direction. Unit: pixel
+float c_camera_fx = 569.8286f; ///< Focal length in x direction. Unit: pixel
+float c_camera_fy = 565.4818f; ///< Focal length in y direction. Unit: pixel
+float c_camera_cx = 439.2660f; ///< Principal point in x direction. Unit: pixel
+float c_camera_cy = 360.5810f; ///< Principal point in y direction. Unit: pixel
 
 Eigen::Matrix3d camera_intrinsic_matrix = Eigen::Matrix3d::Identity();
 Eigen::Matrix3d camera_intrinsic_matrix_inv = Eigen::Matrix3d::Identity();
@@ -771,14 +763,17 @@ private:
 
         seq_id_ = 0;
 
-        camera_intrinsic_matrix << 569.8286, -9.1121, 439.2660,
-                                  0, 565.4818, 360.5810,
-                                  0, 0, 1;
+        // camera_intrinsic_matrix << 569.8286, -9.1121, 439.2660,
+        //                           0, 565.4818, 360.5810,
+        //                           0, 0, 1;
 
         //  camera_intrinsic_matrix << 284.9143, -9.1121, 219.633,
         //                           0, 282.7409, 180.2905,
         //                           0, 0, 1;
 
+        camera_intrinsic_matrix << c_camera_fx, 0, c_camera_cx,
+                                  0, c_camera_fy, c_camera_cy,
+                                  0, 0, 1;
         camera_intrinsic_matrix_inv = camera_intrinsic_matrix.inverse().eval();
 
         // Set a random color map for visualization
@@ -802,33 +797,33 @@ private:
         }
         std::cout << "SuperPoint and SuperGlue inference engine build success." << std::endl;
 
-        // test();
-
         ros::spin();
     }
 
-    void test(){
-        // load image
-        cv::Mat image0 = cv::imread("/home/clarence/git/SuperPoint-SuperGlue-TensorRT/data/1/rgb_00365.jpg", cv::IMREAD_GRAYSCALE);
-        cv::Mat image1 = cv::imread("/home/clarence/git/SuperPoint-SuperGlue-TensorRT/data/1/rgb_00366.jpg", cv::IMREAD_GRAYSCALE);
 
-        superglueInference(image0);
-        superglueInference(image1);
-    }
 };
 
 int main(int argc, char** argv){
     ros::init(argc, argv, "tracking_node");
     
+    std::string setting_file = "settings.yaml";
+    if(argc > 1){
+        setting_file = argv[1];
+    }
+    if(argc > 2){
+        std::cout << "Usage: rosrun single_camera_tracking tracking_node [setting_file]" << std::endl;
+        return -1;
+    }
+    
     // Read parameters from yaml file
     std::string package_path = ros::package::getPath("single_camera_tracking");
-    std::string config_path = package_path + "/cfg/settings.yaml";
+    std::string config_path = package_path + "/cfg/" + setting_file;
 
     YAML::Node config = YAML::LoadFile(config_path);
-    // c_camera_fx = config["camera_fx"].as<float>();
-    // c_camera_fy = config["camera_fy"].as<float>();
-    // c_camera_cx = config["camera_cx"].as<float>();
-    // c_camera_cy = config["camera_cy"].as<float>();
+    c_camera_fx = config["camera_fx"].as<float>();
+    c_camera_fy = config["camera_fy"].as<float>();
+    c_camera_cx = config["camera_cx"].as<float>();
+    c_camera_cy = config["camera_cy"].as<float>();
     points_too_far_threshold = config["points_too_far_threshold"].as<float>();
     points_too_close_threshold = config["points_too_close_threshold"].as<float>();
     c_vote_number_threshold = config["min_vote_number_threshold"].as<int>();
@@ -837,7 +832,7 @@ int main(int argc, char** argv){
     scene_name = config["scene_name"].as<std::string>();
     dataset_path = config["dataset_path"].as<std::string>();
 
-    // std::cout << "c_camera_fx = " << c_camera_fx << ", " << "c_camera_fy = " << c_camera_fy << ", " << "c_camera_cx = " << c_camera_cx << ", " << "c_camera_cy = " << c_camera_cy << std::endl;
+    std::cout << "c_camera_fx = " << c_camera_fx << ", " << "c_camera_fy = " << c_camera_fy << ", " << "c_camera_cx = " << c_camera_cx << ", " << "c_camera_cy = " << c_camera_cy << std::endl;
     std::cout << "points_too_far_threshold = " << points_too_far_threshold << ", " << "points_too_close_threshold = " << points_too_close_threshold << std::endl;
     std::cout << "c_vote_number_threshold = " << c_vote_number_threshold << ", " << "c_iou_threshold = " << c_iou_threshold << ", " << "c_bbox_size_threshold = " << c_bbox_size_threshold << std::endl;
 
