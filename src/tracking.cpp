@@ -53,8 +53,9 @@ int c_vote_number_threshold = 3;
 float c_iou_threshold = 0.5f;
 double c_bbox_size_threshold = 1000.0; // minimum size of bounding box to track
 
-std::string scene_name = "Scene01";
-std::string dataset_path = "";
+std::string semantic_mask_folder = "None";
+
+std::string rgb_image_topic, depth_image_topic, camera_pose_topic;
 
 class BoundingBox{
 public:
@@ -147,6 +148,8 @@ private:
     /// @param rgb_msg 
     /// @param depth_msg
     void imageCallback(const sensor_msgs::ImageConstPtr& rgb_msg, const sensor_msgs::ImageConstPtr& depth_msg, const geometry_msgs::PoseStampedConstPtr& camera_pose_msg){
+        std::cout << "Image callback" << std::endl;
+        
         cv_bridge::CvImagePtr cv_ptr, cv_ptr_depth;
         try{
             cv_ptr = cv_bridge::toCvCopy(rgb_msg); //sensor_msgs::image_encodings::RGB8
@@ -306,13 +309,13 @@ private:
 
     /// @brief The function is used to callback segmentation result
     void segmentationResultCallback(const mask_kpts_msgs::MaskGroup& msg){
-        // if(!matched_points_ready_){
-        //     std::cout << "No matched points ready !!!!!!!!!" << std::endl;
-        //     return;
-        // }
-
         if(msg.objects.size() == 0 || !matched_points_ready_){
-            std::cout << "No mask received or No matched points ready !!!!!!!!!" << std::endl;
+            if(!matched_points_ready_){
+                std::cout << "No matched points ready !!!!!!!!!" << std::endl;
+            }else{
+                std::cout << "No matched points ready !!!!!!!!!. msg.objects.size() = " << msg.objects.size() << std::endl;
+            }
+
             matched_points_ready_ = false;
 
             // Publish the original message
@@ -620,38 +623,41 @@ private:
         }
 
         // Add a static semantic mask for the copied msg. The name of the mask is "classmmseg_"+ five digit number.
-        // std::ostringstream oss;
-        // oss << std::setw(5) << std::setfill('0') << seq_id_;
-        // std::string semantic_mask_path = dataset_path + "/vkitti_2.0.3_rgb/" + scene_name + "/clone/frames/rgb/Camera_0/classmmseg_" + oss.str() + ".png";
-        // // Read the image as a 8UC3 image
-        // cv::Mat semantic_mask = cv::imread(semantic_mask_path, cv::IMREAD_COLOR);
-        // // Create a 8UC1 mask filled with labels
-        // cv::Mat semantic_mask_mono = cv::Mat::zeros(semantic_mask.rows, semantic_mask.cols, CV_8UC1);
-        // for(int i = 0; i < semantic_mask.rows; ++i){
-        //     for(int j = 0; j < semantic_mask.cols; ++j){
-        //         cv::Vec3b color = semantic_mask.at<cv::Vec3b>(i, j);
-        //         // Check the label_id in label_color_map_default
-        //         int label_id = 0;
-        //         for(const auto &label_color : label_color_map_default){
-        //             if(color == label_color.second){
-        //                 label_id = label_color.first;
-        //                 break;
+        // if(semantic_mask_folder != "None"){
+        //     std::ostringstream oss;
+        //     oss << std::setw(5) << std::setfill('0') << seq_id_;        
+        //     std::string semantic_mask_path = semantic_mask_folder + "/classmmseg_" + oss.str() + ".png";
+
+        //     // Read the image as a 8UC3 image
+        //     cv::Mat semantic_mask = cv::imread(semantic_mask_path, cv::IMREAD_COLOR);
+        //     // Create a 8UC1 mask filled with labels
+        //     cv::Mat semantic_mask_mono = cv::Mat::zeros(semantic_mask.rows, semantic_mask.cols, CV_8UC1);
+        //     for(int i = 0; i < semantic_mask.rows; ++i){
+        //         for(int j = 0; j < semantic_mask.cols; ++j){
+        //             cv::Vec3b color = semantic_mask.at<cv::Vec3b>(i, j);
+        //             // Check the label_id in g_label_color_map_default
+        //             int label_id = 0;
+        //             for(const auto &label_color : g_label_color_map_default){
+        //                 if(color == label_color.second){
+        //                     label_id = label_color.first;
+        //                     break;
+        //                 }
+        //             }
+
+        //             // Consider only the vegetation class because it is the only class that can match the Virtual KITTI 2 dataset.
+        //             if(label_id == g_label_id_map_default["Vegetation"]){
+        //                 semantic_mask_mono.at<uchar>(i, j) = label_id;
         //             }
         //         }
-
-        //         // Consider only the vegetation class because it is the only class that can match the Virtual KITTI 2 dataset.
-        //         if(label_id == label_id_map_default["Vegetation"]){
-        //             semantic_mask_mono.at<uchar>(i, j) = label_id;
-        //         }
         //     }
-        // }
 
-        // mask_kpts_msgs::MaskKpts mask_kpts_msg;
-        // mask_kpts_msg.track_id = 65535;
-        // mask_kpts_msg.label = "static";
-        // cv_bridge::CvImage mask_cv_image(std_msgs::Header(), "mono8", semantic_mask_mono);
-        // mask_kpts_msg.mask = *(mask_cv_image.toImageMsg());
-        // copied_msg.objects.push_back(mask_kpts_msg);
+        //     mask_kpts_msgs::MaskKpts mask_kpts_msg;
+        //     mask_kpts_msg.track_id = 65535;
+        //     mask_kpts_msg.label = "static";
+        //     cv_bridge::CvImage mask_cv_image(std_msgs::Header(), "mono8", semantic_mask_mono);
+        //     mask_kpts_msg.mask = *(mask_cv_image.toImageMsg());
+        //     copied_msg.objects.push_back(mask_kpts_msg);
+        // }
 
         // Publish the message
         mask_pub_.publish(copied_msg);
@@ -726,15 +732,16 @@ private:
         cv::waitKey(10);
     }
 
-
     /// @brief The function is used for initializating the node
-    void initialization(){
-        //raw_image_sub_ = nh_.subscribe("/camera_rgb_image", 1, &TrackingNode::imageCallback, this);
-        
+    void initialization(){        
+        std::cout << "camera_pose_topic = " << camera_pose_topic << std::endl;
+        std::cout << "rgb_image_topic = " << rgb_image_topic << std::endl;
+        std::cout << "depth_image_topic = " << depth_image_topic << std::endl;
+
         // Subscribe to camera_rgb_image, camera_depth_image and camera pose synchronously
-        message_filters::Subscriber<sensor_msgs::Image> rgb_image_sub(nh_, "/coda/cam3/rgb", 1);
-        message_filters::Subscriber<sensor_msgs::Image> depth_image_sub(nh_, "/coda/cam3/depth", 1);
-        message_filters::Subscriber<geometry_msgs::PoseStamped> camera_pose_sub(nh_, "/coda/pose_cam3", 1);
+        message_filters::Subscriber<sensor_msgs::Image> rgb_image_sub(nh_, rgb_image_topic, 1);
+        message_filters::Subscriber<sensor_msgs::Image> depth_image_sub(nh_, depth_image_topic, 1);
+        message_filters::Subscriber<geometry_msgs::PoseStamped> camera_pose_sub(nh_, camera_pose_topic, 1);
         typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Image, geometry_msgs::PoseStamped> MySyncPolicy;
         message_filters::Synchronizer<MySyncPolicy> sync(MySyncPolicy(10), rgb_image_sub, depth_image_sub, camera_pose_sub);
         sync.registerCallback(boost::bind(&TrackingNode::imageCallback, this, _1, _2, _3));
@@ -762,14 +769,6 @@ private:
         matched_points_ready_ = false;
 
         seq_id_ = 0;
-
-        // camera_intrinsic_matrix << 569.8286, -9.1121, 439.2660,
-        //                           0, 565.4818, 360.5810,
-        //                           0, 0, 1;
-
-        //  camera_intrinsic_matrix << 284.9143, -9.1121, 219.633,
-        //                           0, 282.7409, 180.2905,
-        //                           0, 0, 1;
 
         camera_intrinsic_matrix << c_camera_fx, 0, c_camera_cx,
                                   0, c_camera_fy, c_camera_cy,
@@ -806,7 +805,7 @@ private:
 int main(int argc, char** argv){
     ros::init(argc, argv, "tracking_node");
     
-    std::string setting_file = "settings.yaml";
+    std::string setting_file = "coda.yaml";
     if(argc > 1){
         setting_file = argv[1];
     }
@@ -829,8 +828,12 @@ int main(int argc, char** argv){
     c_vote_number_threshold = config["min_vote_number_threshold"].as<int>();
     c_iou_threshold = config["min_iou_threshold"].as<float>();
     c_bbox_size_threshold = config["min_bbox_size_threshold"].as<double>();
-    scene_name = config["scene_name"].as<std::string>();
-    dataset_path = config["dataset_path"].as<std::string>();
+   
+    semantic_mask_folder = config["semantic_mask_folder"].as<std::string>();
+
+    rgb_image_topic = config["rgb_image_topic"].as<std::string>();
+    depth_image_topic = config["depth_image_topic"].as<std::string>();
+    camera_pose_topic = config["camera_pose_topic"].as<std::string>();
 
     std::cout << "c_camera_fx = " << c_camera_fx << ", " << "c_camera_fy = " << c_camera_fy << ", " << "c_camera_cx = " << c_camera_cx << ", " << "c_camera_cy = " << c_camera_cy << std::endl;
     std::cout << "points_too_far_threshold = " << points_too_far_threshold << ", " << "points_too_close_threshold = " << points_too_close_threshold << std::endl;

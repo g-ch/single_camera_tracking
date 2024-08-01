@@ -16,21 +16,14 @@ import cv2
 import numpy as np
 import torch
 from mask_kpts_msgs.msg import Keypoint, MaskGroup, MaskKpts
+import yaml
+import argparse
 
 class InstanceSegmentation:
-    def __init__(self):
-        # Mask2former
-        # config = '../model/mask2former_r50_8xb2-lsj-50e_coco-panoptic.py'
-        # config = '/home/cc/git/mmdetection/configs/mask2former/mask2former_r50_lsj_8x2_50e_coco.py'
-        # script_path = os.path.realpath(__file__)
-        # current_directory = os.path.dirname(script_path)
-        # checkpoint = current_directory + '/../model/mask2former_r50_lsj_8x2_50e_coco_20220506_191028-8e96e88b.pth'
+    def __init__(self, image_topic, config, checkpoint, device='cuda:0'):
+        # Initialize the node
+        rospy.init_node('instance_segmentation', anonymous=True)
 
-        config = '/home/cc/git/mmdetection/configs/mask2former/mask2former_r50_lsj_8x2_50e_coco.py'
-        checkpoint = '/home/cc/chg_ws/ros_ws/semantic_map_ws/src/single_camera_tracking/model/mask2former_r50_lsj_8x2_50e_coco_20220506_191028-8e96e88b.pth'
-
-        # Set the device to be used for evaluation
-        device='cuda:0'
         self.model = self.load_model(config, checkpoint, device)
 
         # Set the confidence threshold
@@ -48,7 +41,7 @@ class InstanceSegmentation:
 
 
         # Set the image subscriber
-        self.image_sub = rospy.Subscriber("/coda/cam3/rgb", Image, self.image_callback)
+        self.image_sub = rospy.Subscriber(image_topic, Image, self.image_callback)
         self.mask_pub = rospy.Publisher("/mask_group", MaskGroup, queue_size=1)
 
         self.seg_img_pub = rospy.Publisher("/seg_img", Image, queue_size=1)
@@ -227,6 +220,7 @@ class InstanceSegmentation:
         # Run inference and calculate the time
         time_start = time.time()
         result = self.inference(cv_image, show=False)
+        
         self.result2mask(cv_image, result)
         time_end = time.time()
         print("Inference time (ms) = ", (time_end - time_start) * 1000)
@@ -234,13 +228,30 @@ class InstanceSegmentation:
     
 # Main function
 if __name__ == '__main__':
-    # Initialize the node
-    rospy.init_node('instance_segmentation', anonymous=True)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--yaml', type=str, default='coda.yaml')
+
+    args, unknown = parser.parse_known_args()
+
+    # Get the path of the script
+    path = os.path.dirname(os.path.realpath(__file__))
+    yaml_path = os.path.join(path, "../cfg", args.yaml)
+    print("yaml_path = ", yaml_path)
+
+    # Load the yaml file
+    with open(yaml_path, 'r') as f:
+        settings = yaml.load(f, Loader=yaml.FullLoader)
+
+    image_topic = settings['rgb_image_topic']
+    ins_seg_config = settings['ins_seg_config']
+    ins_seg_checkpoint = settings['ins_seg_checkpoint']
+
+    print("*********** Instacne segmentation image_topic = ", image_topic)
 
     # Initialize the class
-    inst_seg = InstanceSegmentation()
+    inst_seg = InstanceSegmentation(image_topic, ins_seg_config, ins_seg_checkpoint)
 
-    # # Load the image
+    # # For test. Load a image and run inference
     # img = '/home/clarence/git/SuperPoint-SuperGlue-TensorRT/data/1/rgb_00365.jpg'
     # img = cv2.imread(img)
 

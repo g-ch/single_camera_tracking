@@ -1,0 +1,18 @@
+camera_fx: 788.629315
+camera_fy: 786.382230
+camera_cx: 687.158398
+camera_cy: 317.752196
+
+min_bbox_size_threshold: 500
+min_iou_threshold: 0.2
+min_vote_number_threshold: 3
+points_too_close_threshold: 0.5
+points_too_far_threshold: 20.0
+
+rgb_image_topic: /kitti360/cam0/rgb
+depth_image_topic: /kitti360/cam0/depth
+camera_pose_topic: /kitti360/pose_cam
+ins_seg_config: /home/cc/git/mmdetection/configs/mask2former/mask2former_r50_lsj_8x2_50e_coco.py
+ins_seg_checkpoint: /home/cc/chg_ws/ros_ws/semantic_map_ws/src/single_camera_tracking/model/mask2former_r50_lsj_8x2_50e_coco_20220506_191028-8e96e88b.pth
+
+semantic_mask_folder: None

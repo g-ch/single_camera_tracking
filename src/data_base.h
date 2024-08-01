@@ -16,7 +16,7 @@
 
 
 /// @brief Define the label id for the object
-std::unordered_map<std::string, int> label_id_map_default = {
+std::unordered_map<std::string, int> g_label_id_map_default = {
     {"Background", 0},
     {"Terrain", 2},
     {"Sky", 3},
@@ -35,7 +35,7 @@ std::unordered_map<std::string, int> label_id_map_default = {
 };
 
 /// @brief  Define the reversed label id for the object
-std::unordered_map<int, std::string> label_id_map_reversed = {
+std::unordered_map<int, std::string> g_label_id_map_reversed = {
     {0, "Background"},
     {2, "Terrain"},
     {3, "Sky"},
@@ -54,7 +54,7 @@ std::unordered_map<int, std::string> label_id_map_reversed = {
 };
 
 /// @brief Define the label id map for the static objects
-std::unordered_map<std::string, int> label_id_map_static = {
+std::unordered_map<std::string, int> g_label_id_map_static = {
     {"Background", 0},
     {"Terrain", 2},
     {"Sky", 3},
@@ -70,7 +70,7 @@ std::unordered_map<std::string, int> label_id_map_static = {
 };
 
 /// @brief Define the reversed label id map for the static objects
-std::unordered_map<int, std::string> label_id_map_static_reversed = {
+std::unordered_map<int, std::string> g_label_id_map_static_reversed = {
     {0, "Background"},
     {2, "Terrain"},
     {3, "Sky"},
@@ -86,7 +86,7 @@ std::unordered_map<int, std::string> label_id_map_static_reversed = {
 };
 
 /// @brief Define the instance id to label id map
-std::unordered_map<std::string, int> label_to_instance_id_map_default = {
+std::unordered_map<std::string, int> g_label_to_instance_id_map_default = {
     {"Background", 65535},
     {"Terrain", 65534},
     {"Sky", 65533},
@@ -103,10 +103,10 @@ std::unordered_map<std::string, int> label_to_instance_id_map_default = {
     // {"Road", 65533},
 };
 
-const int c_max_movable_object_instance_id = 65523;
+const int g_max_movable_object_instance_id = 65523;
 
 /// @brief Define the label id to instance id map
-std::unordered_map<int, std::string> instance_id_to_label_map_default = {
+std::unordered_map<int, std::string> g_instance_id_to_label_map_default = {
     {65535, "Background"},
     {65534, "Terrain"},
     {65533, "Sky"},
@@ -125,7 +125,7 @@ std::unordered_map<int, std::string> instance_id_to_label_map_default = {
 
 
 /// @brief Define the color for each label. BGR
-std::unordered_map<int, cv::Vec3b> label_color_map_default = {
+std::unordered_map<int, cv::Vec3b> g_label_color_map_default = {
     {0, cv::Vec3b(0, 0, 0)},
     {2, cv::Vec3b(200, 0, 210)},
     {3, cv::Vec3b(255, 200, 90)},
