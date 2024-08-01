@@ -18,9 +18,10 @@ import torch
 from mask_kpts_msgs.msg import Keypoint, MaskGroup, MaskKpts
 import yaml
 import argparse
+import message_filters
 
 class InstanceSegmentation:
-    def __init__(self, image_topic, config, checkpoint, device='cuda:0'):
+    def __init__(self, image_topic, config, checkpoint, device='cuda:0', semantic_msg_available=False, semantic_image_topic=None):
         # Initialize the node
         rospy.init_node('instance_segmentation', anonymous=True)
 
@@ -39,13 +40,22 @@ class InstanceSegmentation:
         time_end = time.time()
         print("Inference time (ms) = ", (time_end - time_start) * 1000)
 
-
         # Set the image subscriber
-        self.image_sub = rospy.Subscriber(image_topic, Image, self.image_callback)
+        if not semantic_msg_available:
+            self.image_sub = rospy.Subscriber(image_topic, Image, self.image_callback)
+        else:
+            self.image_sub = message_filters.Subscriber(image_topic, Image)
+            self.semantic_image_sub = message_filters.Subscriber(semantic_image_topic, Image)
+            ts = message_filters.TimeSynchronizer([self.image_sub, self.semantic_image_sub], 10)
+            ts.registerCallback(self.image_with_semantic_callback)
+
+        
+        # Republish the semantic image. Use the timestamp after instance segmentation is done
+        self.semantic_img_pub = rospy.Publisher("/semantic_image", Image, queue_size=1)
+        
         self.mask_pub = rospy.Publisher("/mask_group", MaskGroup, queue_size=1)
-
-        self.seg_img_pub = rospy.Publisher("/seg_img", Image, queue_size=1)
-
+        self.seg_img_pub = rospy.Publisher("/instance_seg_img", Image, queue_size=1)
+        
         # Set the bridge
         self.bridge = CvBridge()
 
@@ -220,16 +230,40 @@ class InstanceSegmentation:
         # Run inference and calculate the time
         time_start = time.time()
         result = self.inference(cv_image, show=False)
-        
+
         self.result2mask(cv_image, result)
         time_end = time.time()
         print("Inference time (ms) = ", (time_end - time_start) * 1000)
+    
+
+    def image_with_semantic_callback(self, image_msg, semantic_image_msg):
+        # Convert the image to OpenCV format
+        try:
+            cv_image = self.bridge.imgmsg_to_cv2(image_msg) #desired_encoding="bgr8"
+        except CvBridgeError as e:
+            print(e)
+
+        self.frame_id = image_msg.header.frame_id
+
+        # Run inference and calculate the time
+        time_start = time.time()
+        result = self.inference(cv_image, show=False)
+
+        self.result2mask(cv_image, result)
+
+        # Republish the semantic image
+        semantic_image_msg.header.stamp = rospy.Time.now()
+        semantic_image_msg.header.frame_id = self.frame_id
+        self.semantic_img_pub.publish(semantic_image_msg)
+        
+        time_end = time.time()
+        print("* Inference time (ms) = ", (time_end - time_start) * 1000)
         
     
 # Main function
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--yaml', type=str, default='coda.yaml')
+    parser.add_argument('--yaml', type=str, default='kitti360.yaml')
 
     args, unknown = parser.parse_known_args()
 
@@ -246,10 +280,14 @@ if __name__ == '__main__':
     ins_seg_config = settings['ins_seg_config']
     ins_seg_checkpoint = settings['ins_seg_checkpoint']
 
-    print("*********** Instacne segmentation image_topic = ", image_topic)
+    semantic_image_topic = settings['semantic_image_topic']
+    semantic_msg_available = settings['semantic_msg_available']
+
+    print("*********** semantic_image_topic = ", semantic_image_topic)
+    print("*********** semantic_msg_available = ", semantic_msg_available)
 
     # Initialize the class
-    inst_seg = InstanceSegmentation(image_topic, ins_seg_config, ins_seg_checkpoint)
+    inst_seg = InstanceSegmentation(image_topic, ins_seg_config, ins_seg_checkpoint, semantic_msg_available=semantic_msg_available, semantic_image_topic=semantic_image_topic)
 
     # # For test. Load a image and run inference
     # img = '/home/clarence/git/SuperPoint-SuperGlue-TensorRT/data/1/rgb_00365.jpg'
@@ -258,9 +296,4 @@ if __name__ == '__main__':
     # # Run inference TEST
     # result = inst_seg.inference(img, show=True)
     # inst_seg.result2mask(result)
-
-    
-
-
-    
 

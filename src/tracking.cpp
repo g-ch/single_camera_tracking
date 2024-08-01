@@ -33,10 +33,10 @@
 #include <geometry_msgs/PoseStamped.h>
 #include <yaml-cpp/yaml.h>
 #include <iomanip>
-#include "data_base.h"
 
-// define camera intrinsic parameters.
+#include "object_info_handler.h"
 
+// define camera intrinsic parameters with default values
 float c_camera_fx = 569.8286f; ///< Focal length in x direction. Unit: pixel
 float c_camera_fy = 565.4818f; ///< Focal length in y direction. Unit: pixel
 float c_camera_cx = 439.2660f; ///< Principal point in x direction. Unit: pixel
@@ -53,10 +53,13 @@ int c_vote_number_threshold = 3;
 float c_iou_threshold = 0.5f;
 double c_bbox_size_threshold = 1000.0; // minimum size of bounding box to track
 
-std::string semantic_mask_folder = "None";
-
 std::string rgb_image_topic, depth_image_topic, camera_pose_topic;
 
+ObjectInfoHandler object_info_handler;
+
+/**
+ * @brief A class to store the bounding box of an object and do IOU calculation
+ * **/
 class BoundingBox{
 public:
     BoundingBox()
@@ -95,10 +98,18 @@ public:
     double x_min_, x_max_, y_min_, y_max_;
 };
 
+
+/**
+ * @brief Main class to track objects with ROS interface
+ * **/
 class TrackingNode{
 public:
-    TrackingNode(){
-        initialization();
+    TrackingNode(bool if_semantic_msg_available=false){
+        if(if_semantic_msg_available){
+            runWithSemanticImage();
+        }else{
+            run();
+        }
     };
     ~TrackingNode(){};
 
@@ -149,7 +160,7 @@ private:
     /// @param depth_msg
     void imageCallback(const sensor_msgs::ImageConstPtr& rgb_msg, const sensor_msgs::ImageConstPtr& depth_msg, const geometry_msgs::PoseStampedConstPtr& camera_pose_msg){
         std::cout << "Image callback" << std::endl;
-        
+
         cv_bridge::CvImagePtr cv_ptr, cv_ptr_depth;
         try{
             cv_ptr = cv_bridge::toCvCopy(rgb_msg); //sensor_msgs::image_encodings::RGB8
@@ -308,7 +319,23 @@ private:
     }
 
     /// @brief The function is used to callback segmentation result
-    void segmentationResultCallback(const mask_kpts_msgs::MaskGroup& msg){
+    void instanceSegmentationResultCallback(const mask_kpts_msgs::MaskGroup& msg){
+        sensor_msgs::ImageConstPtr semantic_seg_img;
+        segmentationResultHandling(msg, semantic_seg_img, false);
+    }
+
+    /// @brief The function is used to callback segmentation result, with semantic segmentation image
+    void panopticSegmentationResultCallback(const mask_kpts_msgs::MaskGroup::ConstPtr& msg, const sensor_msgs::ImageConstPtr& semantic_seg_img){
+
+        std::cout << "Panoptic segmentation result callback" << std::endl;
+        segmentationResultHandling(*msg, semantic_seg_img, true);
+    }
+    
+    /// @brief Handling the segmentation result. Find the keypoints in each mask and publish the keypoints and masks
+    /// @param msg MaskGroup message from instance segmentation
+    /// @param semantic_seg_img Semantic segmentation image (optional)
+    /// @param update_with_semantic_seg Flag to update the mask with semantic segmentation. If true, the mask will be updated with semantic segmentation.
+    void segmentationResultHandling(const mask_kpts_msgs::MaskGroup& msg, const sensor_msgs::ImageConstPtr& semantic_seg_img, bool update_with_semantic_seg = false){
         if(msg.objects.size() == 0 || !matched_points_ready_){
             if(!matched_points_ready_){
                 std::cout << "No matched points ready !!!!!!!!!" << std::endl;
@@ -621,43 +648,51 @@ private:
             }
             std::cout << "Object label = " << copied_msg.objects[i].label << std::endl;
         }
-
+        
         // Add a static semantic mask for the copied msg. The name of the mask is "classmmseg_"+ five digit number.
-        // if(semantic_mask_folder != "None"){
-        //     std::ostringstream oss;
-        //     oss << std::setw(5) << std::setfill('0') << seq_id_;        
-        //     std::string semantic_mask_path = semantic_mask_folder + "/classmmseg_" + oss.str() + ".png";
+        if(update_with_semantic_seg){
+            // cv::Mat semantic_mask = cv_bridge::toCvCopy(semantic_seg_img, sensor_msgs::image_encodings::BGR8)->image;
+            
+            cv_bridge::CvImagePtr cv_ptr;
+            try{
+                cv_ptr = cv_bridge::toCvCopy(semantic_seg_img);
+            }
+            catch (cv_bridge::Exception& e){
+                ROS_ERROR("cv_bridge exception: %s", e.what());
+                return;
+            }
+            cv::Mat semantic_mask = cv_ptr->image;
 
-        //     // Read the image as a 8UC3 image
-        //     cv::Mat semantic_mask = cv::imread(semantic_mask_path, cv::IMREAD_COLOR);
-        //     // Create a 8UC1 mask filled with labels
-        //     cv::Mat semantic_mask_mono = cv::Mat::zeros(semantic_mask.rows, semantic_mask.cols, CV_8UC1);
-        //     for(int i = 0; i < semantic_mask.rows; ++i){
-        //         for(int j = 0; j < semantic_mask.cols; ++j){
-        //             cv::Vec3b color = semantic_mask.at<cv::Vec3b>(i, j);
-        //             // Check the label_id in g_label_color_map_default
-        //             int label_id = 0;
-        //             for(const auto &label_color : g_label_color_map_default){
-        //                 if(color == label_color.second){
-        //                     label_id = label_color.first;
-        //                     break;
-        //                 }
-        //             }
+            // Create a 8UC1 mask filled with labels
+            cv::Mat semantic_mask_mono = cv::Mat::zeros(semantic_mask.rows, semantic_mask.cols, CV_8UC1);
+            for(int i = 0; i < semantic_mask.rows; ++i){
+                for(int j = 0; j < semantic_mask.cols; ++j){
 
-        //             // Consider only the vegetation class because it is the only class that can match the Virtual KITTI 2 dataset.
-        //             if(label_id == g_label_id_map_default["Vegetation"]){
-        //                 semantic_mask_mono.at<uchar>(i, j) = label_id;
-        //             }
-        //         }
-        //     }
+                    cv::Vec3b color = semantic_mask.at<cv::Vec3b>(i, j);
+                    // Check the label_id in g_label_color_map_default
+                    int label_id = 0;
+                    for(const auto &label_color : object_info_handler.label_color_map){
+                        if(color == label_color.second){
+                            label_id = label_color.first;
+                            break;
+                        }
+                    }
+                    semantic_mask_mono.at<uchar>(i, j) = label_id;
+                }
+            }
 
-        //     mask_kpts_msgs::MaskKpts mask_kpts_msg;
-        //     mask_kpts_msg.track_id = 65535;
-        //     mask_kpts_msg.label = "static";
-        //     cv_bridge::CvImage mask_cv_image(std_msgs::Header(), "mono8", semantic_mask_mono);
-        //     mask_kpts_msg.mask = *(mask_cv_image.toImageMsg());
-        //     copied_msg.objects.push_back(mask_kpts_msg);
-        // }
+            // print object_info_handler.label_color_map
+            // cv::imshow("semantic_mask", semantic_mask);
+            // cv::imshow("semantic_mask_mono", semantic_mask_mono);
+            // cv::waitKey(10);
+
+            mask_kpts_msgs::MaskKpts mask_kpts_msg;
+            mask_kpts_msg.track_id = 65535;
+            mask_kpts_msg.label = "static";
+            cv_bridge::CvImage mask_cv_image(std_msgs::Header(), "mono8", semantic_mask_mono);
+            mask_kpts_msg.mask = *(mask_cv_image.toImageMsg());
+            copied_msg.objects.push_back(mask_kpts_msg);
+        }
 
         // Publish the message
         mask_pub_.publish(copied_msg);
@@ -687,7 +722,6 @@ private:
         bounding_boxes_last_frame_ = bounding_boxes_curr_frame_;
         track_ids_masks_last_ = track_ids_masks;
 
-        std::cout << "segmentationResultCallback finished" << std::endl;
         return;
     }
 
@@ -732,31 +766,9 @@ private:
         cv::waitKey(10);
     }
 
-    /// @brief The function is used for initializating the node
-    void initialization(){        
-        std::cout << "camera_pose_topic = " << camera_pose_topic << std::endl;
-        std::cout << "rgb_image_topic = " << rgb_image_topic << std::endl;
-        std::cout << "depth_image_topic = " << depth_image_topic << std::endl;
-
-        // Subscribe to camera_rgb_image, camera_depth_image and camera pose synchronously
-        message_filters::Subscriber<sensor_msgs::Image> rgb_image_sub(nh_, rgb_image_topic, 1);
-        message_filters::Subscriber<sensor_msgs::Image> depth_image_sub(nh_, depth_image_topic, 1);
-        message_filters::Subscriber<geometry_msgs::PoseStamped> camera_pose_sub(nh_, camera_pose_topic, 1);
-        typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Image, geometry_msgs::PoseStamped> MySyncPolicy;
-        message_filters::Synchronizer<MySyncPolicy> sync(MySyncPolicy(10), rgb_image_sub, depth_image_sub, camera_pose_sub);
-        sync.registerCallback(boost::bind(&TrackingNode::imageCallback, this, _1, _2, _3));
-
-        segmentation_result_sub_ = nh_.subscribe("/mask_group", 1, &TrackingNode::segmentationResultCallback, this);
-
-        image_pub_ = nh_.advertise<sensor_msgs::Image>("/camera/image_super_glued", 1);
-        mask_pub_ = nh_.advertise<mask_kpts_msgs::MaskGroup>("/mask_group_super_glued", 1);
-        key_points_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("/key_points", 1);
-
-        depth_image_repub_ = nh_.advertise<sensor_msgs::Image>("/camera/depth_repub", 1);
-        camera_pose_repub_ = nh_.advertise<geometry_msgs::PoseStamped>("/camera/pose_repub", 1);
-
-        original_point_cloud_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("/original_point_cloud", 1);
-
+    // The function is used to initialize the engine for superpoint and superglue
+    void initEngine()
+    {
         std::string package_path = ros::package::getPath("single_camera_tracking");
         std::string config_path = package_path + "/SuperPoint-SuperGlue-TensorRT/config/config.yaml";
         std::string model_dir = package_path + "/SuperPoint-SuperGlue-TensorRT/weights/";
@@ -795,6 +807,71 @@ private:
             return;
         }
         std::cout << "SuperPoint and SuperGlue inference engine build success." << std::endl;
+    }
+
+    void run(){
+        std::cout << "camera_pose_topic = " << camera_pose_topic << std::endl;
+        std::cout << "rgb_image_topic = " << rgb_image_topic << std::endl;
+        std::cout << "depth_image_topic = " << depth_image_topic << std::endl;
+
+        // Subscribe to camera_rgb_image, camera_depth_image and camera pose synchronously
+        message_filters::Subscriber<sensor_msgs::Image> rgb_image_sub(nh_, rgb_image_topic, 1);
+        message_filters::Subscriber<sensor_msgs::Image> depth_image_sub(nh_, depth_image_topic, 1);
+        message_filters::Subscriber<geometry_msgs::PoseStamped> camera_pose_sub(nh_, camera_pose_topic, 1);
+        typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Image, geometry_msgs::PoseStamped> MySyncPolicy;
+        message_filters::Synchronizer<MySyncPolicy> sync(MySyncPolicy(10), rgb_image_sub, depth_image_sub, camera_pose_sub);
+        sync.registerCallback(boost::bind(&TrackingNode::imageCallback, this, _1, _2, _3));
+
+        segmentation_result_sub_ = nh_.subscribe("/mask_group", 1, &TrackingNode::instanceSegmentationResultCallback, this);
+
+        image_pub_ = nh_.advertise<sensor_msgs::Image>("/camera/image_super_glued", 1);
+        mask_pub_ = nh_.advertise<mask_kpts_msgs::MaskGroup>("/mask_group_super_glued", 1);
+        key_points_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("/key_points", 1);
+
+        depth_image_repub_ = nh_.advertise<sensor_msgs::Image>("/camera/depth_repub", 1);
+        camera_pose_repub_ = nh_.advertise<geometry_msgs::PoseStamped>("/camera/pose_repub", 1);
+
+        original_point_cloud_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("/original_point_cloud", 1);
+
+        
+        initEngine();
+
+        ros::spin();
+    }
+
+    /// @brief The function is used for initializating the node
+    void runWithSemanticImage(){        
+        std::cout << "camera_pose_topic = " << camera_pose_topic << std::endl;
+        std::cout << "rgb_image_topic = " << rgb_image_topic << std::endl;
+        std::cout << "depth_image_topic = " << depth_image_topic << std::endl;
+
+        // Subscribe to camera_rgb_image, camera_depth_image and camera pose synchronously
+        message_filters::Subscriber<sensor_msgs::Image> rgb_image_sub(nh_, rgb_image_topic, 1);
+        message_filters::Subscriber<sensor_msgs::Image> depth_image_sub(nh_, depth_image_topic, 1);
+        message_filters::Subscriber<geometry_msgs::PoseStamped> camera_pose_sub(nh_, camera_pose_topic, 1);
+        typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Image, geometry_msgs::PoseStamped> MySyncPolicy;
+        message_filters::Synchronizer<MySyncPolicy> sync(MySyncPolicy(10), rgb_image_sub, depth_image_sub, camera_pose_sub);
+        sync.registerCallback(boost::bind(&TrackingNode::imageCallback, this, _1, _2, _3));
+
+        std::cout << "semantic_msg_available = true." << std::endl;
+        message_filters::Subscriber<mask_kpts_msgs::MaskGroup> segmentation_result_sub(nh_, "/mask_group", 1);
+        message_filters::Subscriber<sensor_msgs::Image> semantic_image_sub(nh_, "/semantic_image", 1);
+        
+        typedef message_filters::sync_policies::ApproximateTime<mask_kpts_msgs::MaskGroup, sensor_msgs::Image> MySyncPolicy2;
+        message_filters::Synchronizer<MySyncPolicy2> sync2(MySyncPolicy2(10), segmentation_result_sub, semantic_image_sub);
+        sync2.registerCallback(boost::bind(&TrackingNode::panopticSegmentationResultCallback, this, _1, _2));
+
+        image_pub_ = nh_.advertise<sensor_msgs::Image>("/camera/image_super_glued", 1);
+        mask_pub_ = nh_.advertise<mask_kpts_msgs::MaskGroup>("/mask_group_super_glued", 1);
+        key_points_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("/key_points", 1);
+
+        depth_image_repub_ = nh_.advertise<sensor_msgs::Image>("/camera/depth_repub", 1);
+        camera_pose_repub_ = nh_.advertise<geometry_msgs::PoseStamped>("/camera/pose_repub", 1);
+
+        original_point_cloud_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("/original_point_cloud", 1);
+
+        
+        initEngine();
 
         ros::spin();
     }
@@ -806,17 +883,23 @@ int main(int argc, char** argv){
     ros::init(argc, argv, "tracking_node");
     
     std::string setting_file = "coda.yaml";
-    if(argc > 1){
+    std::string object_info_csv_file = "object_info.csv";
+    if(argc == 2){
         setting_file = argv[1];
-    }
-    if(argc > 2){
-        std::cout << "Usage: rosrun single_camera_tracking tracking_node [setting_file]" << std::endl;
+    }else if(argc == 3){
+        setting_file = argv[1];
+        object_info_csv_file = argv[2];
+    }else{
+        std::cout << "Usage: rosrun single_camera_tracking tracking_node [setting_file] [object_info_csv_file]" << std::endl;
         return -1;
     }
     
     // Read parameters from yaml file
     std::string package_path = ros::package::getPath("single_camera_tracking");
     std::string config_path = package_path + "/cfg/" + setting_file;
+    std::string object_info_csv_path = package_path + "/cfg/" + object_info_csv_file;
+    object_info_handler.readObjectInfo(object_info_csv_path);
+
 
     YAML::Node config = YAML::LoadFile(config_path);
     c_camera_fx = config["camera_fx"].as<float>();
@@ -829,18 +912,19 @@ int main(int argc, char** argv){
     c_iou_threshold = config["min_iou_threshold"].as<float>();
     c_bbox_size_threshold = config["min_bbox_size_threshold"].as<double>();
    
-    semantic_mask_folder = config["semantic_mask_folder"].as<std::string>();
-
     rgb_image_topic = config["rgb_image_topic"].as<std::string>();
     depth_image_topic = config["depth_image_topic"].as<std::string>();
     camera_pose_topic = config["camera_pose_topic"].as<std::string>();
+
+    bool semantic_msg_available = config["semantic_msg_available"].as<bool>();
+    std::cout << "semantic_msg_available = " << semantic_msg_available << std::endl;
 
     std::cout << "c_camera_fx = " << c_camera_fx << ", " << "c_camera_fy = " << c_camera_fy << ", " << "c_camera_cx = " << c_camera_cx << ", " << "c_camera_cy = " << c_camera_cy << std::endl;
     std::cout << "points_too_far_threshold = " << points_too_far_threshold << ", " << "points_too_close_threshold = " << points_too_close_threshold << std::endl;
     std::cout << "c_vote_number_threshold = " << c_vote_number_threshold << ", " << "c_iou_threshold = " << c_iou_threshold << ", " << "c_bbox_size_threshold = " << c_bbox_size_threshold << std::endl;
 
     // Create a node
-    TrackingNode tracking_node;
+    TrackingNode tracking_node(semantic_msg_available);
     
     return 0;
 }

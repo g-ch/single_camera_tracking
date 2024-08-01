@@ -83,20 +83,24 @@ if __name__ == '__main__':
     parser.add_argument('--rgb_dir', type=str, default='/media/cc/Elements/KITTI-360/data_2d_raw/2013_05_28_drive_0000_sync/image_00/data_rect')
     parser.add_argument('--depth_dir', type=str, default='/media/cc/Elements/KITTI-360/depth/2013_05_28_drive_0000_sync/sequences/0')
     parser.add_argument('--pose_txt', type=str, default='/media/cc/Elements/KITTI-360/data_poses/2013_05_28_drive_0000_sync/cam0_to_world.txt')
+    parser.add_argument('--semantic_seg_dir', type=str, default='/media/cc/Elements/KITTI-360/data_2d_semantics/train/2013_05_28_drive_0000_sync/image_00/semantic_rgb')
 
     parser.add_argument('--rgb_image_topic', type=str, default='/kitti360/cam0/rgb')
     parser.add_argument('--depth_image_topic', type=str, default='/kitti360/cam0/depth')
     parser.add_argument('--camera_pose_topic', type=str, default='/kitti360/pose_cam')
+    parser.add_argument('--semantic_seg_image_topic', type=str, default='/kitti360/cam0/semantic')
 
     parser.add_argument('--starting_frame_idx', type=int, default=1100)
 
     parser.add_argument('--loop_rate', type=int, default=0.5)
+    parser.add_argument('--publish_semantic_seg', type=bool, default=True)
 
     args = parser.parse_args()
 
     rgb_image_pub = rospy.Publisher(args.rgb_image_topic, Image, queue_size=1)
     depth_image_pub = rospy.Publisher(args.depth_image_topic, Image, queue_size=1)
     camera_pose_pub = rospy.Publisher(args.camera_pose_topic, PoseStamped, queue_size=1)
+    semantic_seg_image_pub = rospy.Publisher(args.semantic_seg_image_topic, Image, queue_size=1)
 
     # Read the pose data. Only publish the image with the corresponding pose
     pose_data = read_pose_txt(args.pose_txt)
@@ -141,7 +145,6 @@ if __name__ == '__main__':
             # Raise an exception
             raise ValueError("Depth Image is None")
         
-
         # Publish the camera pose
         if not init_pose_recorded:
             init_pose_recorded = True
@@ -158,6 +161,20 @@ if __name__ == '__main__':
         pose_msg.pose.orientation.z = quaternion[2]
         pose_msg.pose.orientation.w = quaternion[3]
         camera_pose_pub.publish(pose_msg)
+
+        if args.publish_semantic_seg:
+            semantic_seg_image_path = os.path.join(args.semantic_seg_dir, str(frame_idx).zfill(10) + '.png')
+            semantic_seg_image = cv2.imread(semantic_seg_image_path, cv2.IMREAD_UNCHANGED)
+
+            semantic_seg_image_msg = Image()
+            if semantic_seg_image is not None:
+                semantic_seg_image_msg = CvBridge().cv2_to_imgmsg(semantic_seg_image)
+
+                semantic_seg_image_msg.header.stamp = time
+                semantic_seg_image_pub.publish(semantic_seg_image_msg)
+            else:
+                # Raise an exception
+                raise ValueError("Semantic Segmentation Image is None")
 
         if published_pose_idx % 10 == 0:
             print("Progress: ", published_pose_idx, "/", len(pose_data))

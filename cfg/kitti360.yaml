@@ -15,4 +15,5 @@ camera_pose_topic: /kitti360/pose_cam
 ins_seg_config: /home/cc/git/mmdetection/configs/mask2former/mask2former_r50_lsj_8x2_50e_coco.py
 ins_seg_checkpoint: /home/cc/chg_ws/ros_ws/semantic_map_ws/src/single_camera_tracking/model/mask2former_r50_lsj_8x2_50e_coco_20220506_191028-8e96e88b.pth
 
-semantic_mask_folder: None
+semantic_image_topic: /kitti360/cam0/semantic
+semantic_msg_available: true  # true or false
