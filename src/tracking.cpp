@@ -554,8 +554,8 @@ private:
                         key_points.push_back(p_last);
 
                         // Show kpt_curr and kpt_last
-                        std::cout << "kpt_curr = " << kpt_curr.x << ", " << kpt_curr.y << ", " << kpt_curr.z << std::endl;
-                        std::cout << "kpt_last = " << kpt_last.x << ", " << kpt_last.y << ", " << kpt_last.z << std::endl;
+                        // std::cout << "kpt_curr = " << kpt_curr.x << ", " << kpt_curr.y << ", " << kpt_curr.z << std::endl;
+                        // std::cout << "kpt_last = " << kpt_last.x << ", " << kpt_last.y << ", " << kpt_last.z << std::endl;
 
                         break;  // Breaking the loop as one point can only have one match.
                     }

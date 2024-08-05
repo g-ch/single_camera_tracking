@@ -1,7 +1,7 @@
-camera_fx: 788.629315
-camera_fy: 786.382230
-camera_cx: 687.158398
-camera_cy: 317.752196
+camera_fx: 552.554261
+camera_fy: 552.554261
+camera_cx: 682.049453
+camera_cy: 238.769549
 
 min_bbox_size_threshold: 500
 min_iou_threshold: 0.2

@@ -14,9 +14,6 @@ from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 
-        
-init_pose_recorded = False
-        
 
 def generate_point_cloud(depth_image, K):
     fx, fy = K[0, 0], K[1, 1]
@@ -35,6 +32,17 @@ def generate_point_cloud(depth_image, K):
     points = point_cloud.reshape(-1, 3)
 
     return points
+
+
+# Function to remove outliers from point cloud
+def remove_outliers(point_cloud):
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(point_cloud)
+
+    cl, ind = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=1.0)
+    pcd = pcd.select_by_index(ind)
+    
+    return np.asarray(pcd.points)
 
 
 def visualize_point_cloud(points, point_size=1.0):
@@ -66,7 +74,18 @@ def read_pose_txt(pose_txt):
             # Each line has 17 numbers, the first number is an integer denoting the frame index. The rest is a 4x4 matrix denoting the rigid body transform from the rectified perspective camera coordinates to the world coordinate system.
             pose = line.split()
             frame_idx = int(pose[0])
-            cam0_to_world = np.array(pose[1:], dtype=np.float32).reshape(4, 4)
+
+            # Check if line has 13 elements. If so, add 0 0 0 1 to the pose
+            if len(pose) == 13:
+                # Add 0 0 0 1 to the pose
+                pose += ['0', '0', '0', '1']
+                imu_to_world = np.array(pose[1:], dtype=np.float32).reshape(4, 4)
+                cam0_to_world = imu_to_world  ### TODO: ADD THE TRANSFORMATION FROM IMU TO CAM0
+            elif len(pose) == 17:
+                cam0_to_world = np.array(pose[1:], dtype=np.float32).reshape(4, 4)
+            else:
+                raise ValueError("Invalid number of elements in pose")
+            
             translation = cam0_to_world[:3, 3]
             quaternion = tfm.quaternion_from_matrix(cam0_to_world)
 
@@ -82,7 +101,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--rgb_dir', type=str, default='/media/cc/Elements/KITTI-360/data_2d_raw/2013_05_28_drive_0000_sync/image_00/data_rect')
     parser.add_argument('--depth_dir', type=str, default='/media/cc/Elements/KITTI-360/depth/2013_05_28_drive_0000_sync/sequences/0')
-    parser.add_argument('--pose_txt', type=str, default='/media/cc/Elements/KITTI-360/data_poses/2013_05_28_drive_0000_sync/cam0_to_world.txt')
+    parser.add_argument('--pose_txt', type=str, default='/media/cc/Elements/KITTI-360/data_poses/2013_05_28_drive_0000_sync/cam0_to_world.txt') #
     parser.add_argument('--semantic_seg_dir', type=str, default='/media/cc/Elements/KITTI-360/data_2d_semantics/train/2013_05_28_drive_0000_sync/image_00/semantic_rgb')
 
     parser.add_argument('--rgb_image_topic', type=str, default='/kitti360/cam0/rgb')
@@ -90,7 +109,7 @@ if __name__ == '__main__':
     parser.add_argument('--camera_pose_topic', type=str, default='/kitti360/pose_cam')
     parser.add_argument('--semantic_seg_image_topic', type=str, default='/kitti360/cam0/semantic')
 
-    parser.add_argument('--starting_frame_idx', type=int, default=1100)
+    parser.add_argument('--starting_frame_idx', type=int, default=1270)
 
     parser.add_argument('--loop_rate', type=int, default=0.5)
     parser.add_argument('--publish_semantic_seg', type=bool, default=True)
@@ -124,6 +143,10 @@ if __name__ == '__main__':
         rgb_image = cv2.imread(rgb_image_path)
         depth_image = np.load(depth_image_path)
 
+        # # Correct depth to Rect Image focal length. Original focal length is 552.554261, but the rectified focal length is 788.629315. So, we need to scale the depth image by 788.629315/552.554261=1.426
+        # depth_image = depth_image * 1.426
+        # # depth_image = depth_image * 1.326
+
         time = rospy.get_rostime()
 
         # Publish the image
@@ -146,16 +169,11 @@ if __name__ == '__main__':
             raise ValueError("Depth Image is None")
         
         # Publish the camera pose
-        if not init_pose_recorded:
-            init_pose_recorded = True
-            init_translation = translation
-            init_quaternion = quaternion
-
         pose_msg = PoseStamped()
         pose_msg.header.stamp = time
-        pose_msg.pose.position.x = translation[0] - init_translation[0]
-        pose_msg.pose.position.y = translation[1] - init_translation[1]
-        pose_msg.pose.position.z = translation[2] - init_translation[2]
+        pose_msg.pose.position.x = translation[0]
+        pose_msg.pose.position.y = translation[1]
+        pose_msg.pose.position.z = translation[2]
         pose_msg.pose.orientation.x = quaternion[0]
         pose_msg.pose.orientation.y = quaternion[1]
         pose_msg.pose.orientation.z = quaternion[2]
@@ -185,10 +203,10 @@ if __name__ == '__main__':
         rate.sleep()
 
 
-    ## Test CODE. Load the depth image and visualize the point cloud
-    # depth_image = np.load('/media/cc/Elements/KITTI-360/depth/2013_05_28_drive_0000_sync/sequences/0/0000001000.npy')
+    # ## Test CODE. Load the depth image and visualize the point cloud
+    # depth_image = np.load('/media/cc/Elements/KITTI-360/depth/2013_05_28_drive_0000_sync/sequences/0/0000001507.npy')
 
-    # filtered_depth_image = cv2.bilateralFilter(depth_image, 5, 50, 50)
+    # # filtered_depth_image = cv2.bilateralFilter(depth_image, 5, 50, 50)
 
     # # plt.imshow(depth_image, cmap='gray')
     # # plt.colorbar()
@@ -201,6 +219,9 @@ if __name__ == '__main__':
     #             [0.000000, 786.382230, 317.752196],
     #             [0.000000, 0.000000, 1.000000]])
     
-    # points = generate_point_cloud(filtered_depth_image, K)
+    # points = generate_point_cloud(depth_image, K)
+    
+    # # points = remove_outliers(points)
+
     # visualize_point_cloud(points, 0.5)
 
