@@ -80,7 +80,17 @@ def read_pose_txt(pose_txt):
                 # Add 0 0 0 1 to the pose
                 pose += ['0', '0', '0', '1']
                 imu_to_world = np.array(pose[1:], dtype=np.float32).reshape(4, 4)
-                cam0_to_world = imu_to_world  ### TODO: ADD THE TRANSFORMATION FROM IMU TO CAM0
+
+                # camera to imu transformation 0.0371783278 -0.0986182135 0.9944306009 1.5752681039 0.9992675562 -0.0053553387 -0.0378902567 0.0043914093 0.0090621821 0.9951109327 0.0983468786 -0.6500000000 
+                camera_to_imu = np.array([
+                    [ 0.0371783278, -0.0986182135, 0.9944306009, 1.5752681039],
+                    [ 0.9992675562, -0.0053553387, -0.0378902567, 0.0043914093],
+                    [ 0.0090621821,  0.9951109327, 0.0983468786, -0.6500000000],
+                    [0, 0, 0, 1]
+                ])
+
+                cam0_to_world = np.dot(imu_to_world, camera_to_imu)
+
             elif len(pose) == 17:
                 cam0_to_world = np.array(pose[1:], dtype=np.float32).reshape(4, 4)
             else:
@@ -101,7 +111,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--rgb_dir', type=str, default='/media/cc/Elements/KITTI-360/data_2d_raw/2013_05_28_drive_0000_sync/image_00/data_rect')
     parser.add_argument('--depth_dir', type=str, default='/media/cc/Elements/KITTI-360/depth/2013_05_28_drive_0000_sync/sequences/0')
-    parser.add_argument('--pose_txt', type=str, default='/media/cc/Elements/KITTI-360/data_poses/2013_05_28_drive_0000_sync/cam0_to_world.txt') #
+    parser.add_argument('--pose_txt', type=str, default='/media/cc/Elements/KITTI-360/data_poses/2013_05_28_drive_0000_sync/poses.txt') #
     parser.add_argument('--semantic_seg_dir', type=str, default='/media/cc/Elements/KITTI-360/data_2d_semantics/train/2013_05_28_drive_0000_sync/image_00/semantic_rgb')
 
     parser.add_argument('--rgb_image_topic', type=str, default='/kitti360/cam0/rgb')
