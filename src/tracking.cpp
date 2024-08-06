@@ -330,12 +330,59 @@ private:
         std::cout << "Panoptic segmentation result callback" << std::endl;
         segmentationResultHandling(*msg, semantic_seg_img, true);
     }
+
+    /// @brief The function is set a static mask msg from a given semantic segmentation image
+    void getStaticMaskMsg(const sensor_msgs::ImageConstPtr &semantic_seg_img, mask_kpts_msgs::MaskKpts &mask_kpts_msg)
+    {
+        cv_bridge::CvImagePtr cv_ptr;
+            try{
+                cv_ptr = cv_bridge::toCvCopy(semantic_seg_img);
+            }
+            catch (cv_bridge::Exception& e){
+                ROS_ERROR("cv_bridge exception: %s", e.what());
+                return;
+            }
+            cv::Mat semantic_mask = cv_ptr->image;
+
+            // Create a 8UC1 mask filled with labels
+            cv::Mat semantic_mask_mono = cv::Mat::zeros(semantic_mask.rows, semantic_mask.cols, CV_8UC1);
+
+            for(int i = 0; i < semantic_mask.rows; ++i){
+                for(int j = 0; j < semantic_mask.cols; ++j){
+
+                    cv::Vec3b color = semantic_mask.at<cv::Vec3b>(i, j);
+                    // Check the label_id in g_label_color_map_default
+                    int label_id = 0;
+                    for(const auto &label_color : object_info_handler.label_color_map){
+                        if(color == label_color.second){
+                            label_id = label_color.first;
+                            break;
+                        }
+                    }
+
+                    semantic_mask_mono.at<uchar>(i, j) = label_id;
+                }
+            }
+
+            // print object_info_handler.label_color_map
+            // cv::imshow("semantic_mask", semantic_mask);
+            // cv::imshow("semantic_mask_mono", semantic_mask_mono);
+            // cv::waitKey(10);
+
+            mask_kpts_msg.track_id = 65535;
+            mask_kpts_msg.label = "static";
+            cv_bridge::CvImage mask_cv_image(std_msgs::Header(), "mono8", semantic_mask_mono);
+            mask_kpts_msg.mask = *(mask_cv_image.toImageMsg());
+    }
     
     /// @brief Handling the segmentation result. Find the keypoints in each mask and publish the keypoints and masks
     /// @param msg MaskGroup message from instance segmentation
     /// @param semantic_seg_img Semantic segmentation image (optional)
     /// @param update_with_semantic_seg Flag to update the mask with semantic segmentation. If true, the mask will be updated with semantic segmentation.
     void segmentationResultHandling(const mask_kpts_msgs::MaskGroup& msg, const sensor_msgs::ImageConstPtr& semantic_seg_img, bool update_with_semantic_seg = false){
+        // Copy the message to a local variable
+        mask_kpts_msgs::MaskGroup copied_msg = msg;
+
         if(msg.objects.size() == 0 || !matched_points_ready_){
             if(!matched_points_ready_){
                 std::cout << "No matched points ready !!!!!!!!!" << std::endl;
@@ -345,11 +392,17 @@ private:
 
             matched_points_ready_ = false;
 
-            // Publish the original message
-            mask_kpts_msgs::MaskGroup copied_msg = msg;
+            // Publish the original message (and segmentation result if available)
             copied_msg.header.stamp = ros::Time::now();
             copied_msg.header.frame_id = "map";
             copied_msg.header.seq = seq_id_;
+
+            if(update_with_semantic_seg){
+                mask_kpts_msgs::MaskKpts mask_kpts_msg;
+                getStaticMaskMsg(semantic_seg_img, mask_kpts_msg);
+                copied_msg.objects.push_back(mask_kpts_msg);
+            }
+
             mask_pub_.publish(copied_msg);
 
             // Publish depth_img_curr_
@@ -371,8 +424,7 @@ private:
             return;
         }
 
-        // Copy the message to a local variable
-        mask_kpts_msgs::MaskGroup copied_msg = msg;
+        
 
         // Create a vector to store all the masks
         std::vector<cv::Mat> masks;
@@ -650,47 +702,9 @@ private:
         }
         
         // Add a static semantic mask for the copied msg. The name of the mask is "classmmseg_"+ five digit number.
-        if(update_with_semantic_seg){
-            // cv::Mat semantic_mask = cv_bridge::toCvCopy(semantic_seg_img, sensor_msgs::image_encodings::BGR8)->image;
-            
-            cv_bridge::CvImagePtr cv_ptr;
-            try{
-                cv_ptr = cv_bridge::toCvCopy(semantic_seg_img);
-            }
-            catch (cv_bridge::Exception& e){
-                ROS_ERROR("cv_bridge exception: %s", e.what());
-                return;
-            }
-            cv::Mat semantic_mask = cv_ptr->image;
-
-            // Create a 8UC1 mask filled with labels
-            cv::Mat semantic_mask_mono = cv::Mat::zeros(semantic_mask.rows, semantic_mask.cols, CV_8UC1);
-            for(int i = 0; i < semantic_mask.rows; ++i){
-                for(int j = 0; j < semantic_mask.cols; ++j){
-
-                    cv::Vec3b color = semantic_mask.at<cv::Vec3b>(i, j);
-                    // Check the label_id in g_label_color_map_default
-                    int label_id = 0;
-                    for(const auto &label_color : object_info_handler.label_color_map){
-                        if(color == label_color.second){
-                            label_id = label_color.first;
-                            break;
-                        }
-                    }
-                    semantic_mask_mono.at<uchar>(i, j) = label_id;
-                }
-            }
-
-            // print object_info_handler.label_color_map
-            // cv::imshow("semantic_mask", semantic_mask);
-            // cv::imshow("semantic_mask_mono", semantic_mask_mono);
-            // cv::waitKey(10);
-
+        if(update_with_semantic_seg){            
             mask_kpts_msgs::MaskKpts mask_kpts_msg;
-            mask_kpts_msg.track_id = 65535;
-            mask_kpts_msg.label = "static";
-            cv_bridge::CvImage mask_cv_image(std_msgs::Header(), "mono8", semantic_mask_mono);
-            mask_kpts_msg.mask = *(mask_cv_image.toImageMsg());
+            getStaticMaskMsg(semantic_seg_img, mask_kpts_msg);
             copied_msg.objects.push_back(mask_kpts_msg);
         }
 

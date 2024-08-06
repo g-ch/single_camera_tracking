@@ -73,10 +73,11 @@ def read_pose_txt(pose_txt):
         for line in lines:
             # Each line has 17 numbers, the first number is an integer denoting the frame index. The rest is a 4x4 matrix denoting the rigid body transform from the rectified perspective camera coordinates to the world coordinate system.
             pose = line.split()
-            frame_idx = int(pose[0])
+            
 
             # Check if line has 13 elements. If so, add 0 0 0 1 to the pose
             if len(pose) == 13:
+                frame_idx = int(pose[0])
                 # Add 0 0 0 1 to the pose
                 pose += ['0', '0', '0', '1']
                 imu_to_world = np.array(pose[1:], dtype=np.float32).reshape(4, 4)
@@ -90,8 +91,8 @@ def read_pose_txt(pose_txt):
                 ])
 
                 cam0_to_world = np.dot(imu_to_world, camera_to_imu)
-
             elif len(pose) == 17:
+                frame_idx = int(pose[0])
                 cam0_to_world = np.array(pose[1:], dtype=np.float32).reshape(4, 4)
             else:
                 raise ValueError("Invalid number of elements in pose")
@@ -109,17 +110,23 @@ if __name__ == '__main__':
     rospy.init_node('kitti360_data_reader', anonymous=True)
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--rgb_dir', type=str, default='/media/cc/Elements/KITTI-360/data_2d_raw/2013_05_28_drive_0000_sync/image_00/data_rect')
-    parser.add_argument('--depth_dir', type=str, default='/media/cc/Elements/KITTI-360/depth/2013_05_28_drive_0000_sync/sequences/0')
-    parser.add_argument('--pose_txt', type=str, default='/media/cc/Elements/KITTI-360/data_poses/2013_05_28_drive_0000_sync/poses.txt') #
-    parser.add_argument('--semantic_seg_dir', type=str, default='/media/cc/Elements/KITTI-360/data_2d_semantics/train/2013_05_28_drive_0000_sync/image_00/semantic_rgb')
+    # parser.add_argument('--rgb_dir', type=str, default='/media/cc/Elements/KITTI-360/data_2d_raw/2013_05_28_drive_0000_sync/image_00/data_rect')
+    # parser.add_argument('--depth_dir', type=str, default='/media/cc/Elements/KITTI-360/depth/2013_05_28_drive_0000_sync/sequences/0')
+    # parser.add_argument('--pose_txt', type=str, default='/media/cc/Elements/KITTI-360/data_poses/2013_05_28_drive_0000_sync/poses.txt') #
+    # parser.add_argument('--semantic_seg_dir', type=str, default='/media/cc/Elements/KITTI-360/data_2d_semantics/train/2013_05_28_drive_0000_sync/image_00/semantic_rgb')
+    # parser.add_argument('--starting_frame_idx', type=int, default=1270)
+
+    parser.add_argument('--rgb_dir', type=str, default='/media/cc/Elements/KITTI-360/data_2d_test_slam/test_0/2013_05_28_drive_0008_sync/image_00/data_rect')
+    parser.add_argument('--depth_dir', type=str, default='/media/cc/Elements/KITTI-360/data_2d_test_slam/depth/test_0/2013_05_28_drive_0008_sync/sequences/8')
+    parser.add_argument('--pose_txt', type=str, default='/media/cc/Elements/KITTI-360/data_2d_test_slam/poses/test_0_gt.txt')
+    parser.add_argument('--semantic_seg_dir', type=str, default='/media/cc/Elements/KITTI-360/data_2d_test_slam/segmentation/test_0/2013_05_28_drive_0008_sync')
+    parser.add_argument('--starting_frame_idx', type=int, default=200)
 
     parser.add_argument('--rgb_image_topic', type=str, default='/kitti360/cam0/rgb')
     parser.add_argument('--depth_image_topic', type=str, default='/kitti360/cam0/depth')
     parser.add_argument('--camera_pose_topic', type=str, default='/kitti360/pose_cam')
     parser.add_argument('--semantic_seg_image_topic', type=str, default='/kitti360/cam0/semantic')
 
-    parser.add_argument('--starting_frame_idx', type=int, default=1270)
 
     parser.add_argument('--loop_rate', type=int, default=0.5)
     parser.add_argument('--publish_semantic_seg', type=bool, default=True)
@@ -153,10 +160,6 @@ if __name__ == '__main__':
         rgb_image = cv2.imread(rgb_image_path)
         depth_image = np.load(depth_image_path)
 
-        # # Correct depth to Rect Image focal length. Original focal length is 552.554261, but the rectified focal length is 788.629315. So, we need to scale the depth image by 788.629315/552.554261=1.426
-        # depth_image = depth_image * 1.426
-        # # depth_image = depth_image * 1.326
-
         time = rospy.get_rostime()
 
         # Publish the image
@@ -181,6 +184,7 @@ if __name__ == '__main__':
         # Publish the camera pose
         pose_msg = PoseStamped()
         pose_msg.header.stamp = time
+        pose_msg.header.frame_id = "map"
         pose_msg.pose.position.x = translation[0]
         pose_msg.pose.position.y = translation[1]
         pose_msg.pose.position.z = translation[2]
@@ -192,7 +196,7 @@ if __name__ == '__main__':
 
         if args.publish_semantic_seg:
             semantic_seg_image_path = os.path.join(args.semantic_seg_dir, str(frame_idx).zfill(10) + '.png')
-            semantic_seg_image = cv2.imread(semantic_seg_image_path, cv2.IMREAD_UNCHANGED)
+            semantic_seg_image = cv2.imread(semantic_seg_image_path) 
 
             semantic_seg_image_msg = Image()
             if semantic_seg_image is not None:

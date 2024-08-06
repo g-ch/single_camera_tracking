@@ -212,10 +212,10 @@ class InstanceSegmentation:
                 this_mask.bbox_br.y = bboxes[idx, 3]
                 this_mask.label = str(labels[idx])
                 this_mask.mask = self.bridge.cv2_to_imgmsg(masks[idx, :, :], encoding="mono8")
-                mask_group.header.stamp = rospy.Time.now()
-                mask_group.header.frame_id = self.frame_id
                 mask_group.objects.append(this_mask)
             
+            mask_group.header.stamp = rospy.Time.now()
+            mask_group.header.frame_id = self.frame_id
             self.mask_pub.publish(mask_group)
 
     def image_callback(self, msg):
