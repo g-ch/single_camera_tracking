@@ -222,10 +222,11 @@ private:
     /// @brief The function is used to get superpoint and superglue inference result
     /// @param img 
     void superglueInference(cv::Mat &img, bool draw_match = true){
-        if(matched_points_ready_){
-            std::cout << "Last Matched result not used. Will skip this frame." << std::endl;
-            return;
-        }
+        
+        // if(matched_points_ready_){
+        //     std::cout << "Last Matched result not used. Will skip this frame." << std::endl;
+        //     return;
+        // }
 
         // Resize image
         int img_ori_width = img.cols;
@@ -424,7 +425,6 @@ private:
             return;
         }
 
-        
 
         // Create a vector to store all the masks
         std::vector<cv::Mat> masks;

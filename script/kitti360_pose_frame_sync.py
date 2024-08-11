@@ -28,7 +28,7 @@ def process_files(input_txt, image_folder, output_txt):
             
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input_txt', type=str, default='/media/cc/Elements/KITTI-360_Scripts/kitti360Scripts/kitti360scripts/evaluation/semantic_slam/test_data/orbslam/test_poses_3.txt', help='Path to the input text file')
+    parser.add_argument('--input_txt', type=str, default='/media/cc/Elements/KITTI-360_Scripts/kitti360Scripts/kitti360scripts/evaluation/semantic_slam/test_data/semantic_suma/test_poses_3.txt', help='Path to the input text file')
     parser.add_argument('--image_folder', type=str, default='/media/cc/Elements/KITTI-360/data_2d_test_slam/test_3/2013_05_28_drive_0002_sync/image_00/data_rect', help='Path to the folder containing the images')
     parser.add_argument('--output_txt', type=str, default='output.txt', help='Path to the output text file')
     args = parser.parse_args()
