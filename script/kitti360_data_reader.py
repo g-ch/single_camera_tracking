@@ -161,19 +161,26 @@ if __name__ == '__main__':
     rospy.init_node('kitti360_data_reader', anonymous=True)
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--rgb_dir', type=str, default='/media/cc/Elements/KITTI-360/data_2d_raw/2013_05_28_drive_0000_sync/image_00/data_rect')
-    parser.add_argument('--depth_dir', type=str, default='/media/cc/Elements/KITTI-360/depth/2013_05_28_drive_0000_sync/sequences/0')
-    parser.add_argument('--pose_txt', type=str, default='/media/cc/Elements/KITTI-360/data_poses/2013_05_28_drive_0000_sync/poses.txt') #
-    parser.add_argument('--semantic_seg_dir', type=str, default='/media/cc/Elements/KITTI-360/data_2d_raw/2013_05_28_drive_0000_sync/image_00_segmentation')
-    parser.add_argument('--starting_frame_idx', type=int, default=1)
-    parser.add_argument('--stop_frame_idx', type=int, default=385)
 
-    # parser.add_argument('--rgb_dir', type=str, default='/media/cc/Elements/KITTI-360/data_2d_test_slam/test_0/2013_05_28_drive_0008_sync/image_00/data_rect')
+    # parser.add_argument('--rgb_dir', type=str, default='/media/cc/Elements/KITTI-360/data_2d_raw/2013_05_28_drive_0000_sync/image_00/data_rect')
+    # parser.add_argument('--depth_dir', type=str, default='/media/cc/Elements/KITTI-360/depth/sgm/2013_05_28_drive_0000_sync/sequences/0')
+    # # parser.add_argument('--depth_dir', type=str, default='/media/cc/Elements/KITTI-360/depth/2013_05_28_drive_0000_sync/sequences/0')
+    # parser.add_argument('--pose_txt', type=str, default='/media/cc/Elements/KITTI-360/data_poses/2013_05_28_drive_0000_sync/poses.txt') #
+    # #parser.add_argument('--semantic_seg_dir', type=str, default='/media/cc/Elements/KITTI-360/data_2d_raw/2013_05_28_drive_0000_sync/image_00_segmentation')
+    # parser.add_argument('--semantic_seg_dir', type=str, default='/media/cc/Elements/KITTI-360/data_2d_raw/2013_05_28_drive_0000_sync/image_00_cmnext_segmentation')
+    # parser.add_argument('--starting_frame_idx', type=int, default=1)
+    # parser.add_argument('--stop_frame_idx', type=int, default=385)
+
+    parser.add_argument('--rgb_dir', type=str, default='/media/cc/Elements/KITTI-360/data_2d_test_slam/test_2/2013_05_28_drive_0004_sync/image_00/data_rect')
     # parser.add_argument('--depth_dir', type=str, default='/media/cc/Elements/KITTI-360/data_2d_test_slam/depth/test_0/2013_05_28_drive_0008_sync/sequences/8')
-    # parser.add_argument('--pose_txt', type=str, default='/media/cc/Elements/KITTI-360/data_2d_test_slam/poses/test_0_suma.txt')
     # parser.add_argument('--semantic_seg_dir', type=str, default='/media/cc/Elements/KITTI-360/data_2d_test_slam/segmentation/test_0/2013_05_28_drive_0008_sync')
-    # parser.add_argument('--starting_frame_idx', type=int, default=0)
-    # parser.add_argument('--stop_frame_idx', type=int, default=1000000)
+    parser.add_argument('--depth_dir', type=str, default='/media/cc/Elements/KITTI-360/data_2d_test_slam/depth_sgm/test_2/2013_05_28_drive_0004_sync/depth')
+    parser.add_argument('--semantic_seg_dir', type=str, default='/media/cc/Elements/KITTI-360/data_2d_test_slam/segmentation_cmnext/test_2/2013_05_28_drive_0004_sync')
+    parser.add_argument('--pose_txt', type=str, default='/media/cc/Elements/KITTI-360/data_2d_test_slam/poses/test_2_poses.txt') #orb_slam2
+
+    #parser.add_argument('--pose_txt', type=str, default='/media/cc/Elements/KITTI-360/data_2d_test_slam/poses/test_0_suma.txt')
+    parser.add_argument('--starting_frame_idx', type=int, default=0)
+    parser.add_argument('--stop_frame_idx', type=int, default=1000000)
 
     parser.add_argument('--rgb_image_topic', type=str, default='/kitti360/cam0/rgb')
     parser.add_argument('--depth_image_topic', type=str, default='/kitti360/cam0/depth')
@@ -185,7 +192,7 @@ if __name__ == '__main__':
     parser.add_argument('--publish_semantic_seg', type=bool, default=True)
     parser.add_argument('--publish_semantic_pointcloud', type=bool, default=True)
 
-    parser.add_argument('--repeat_first_frame', type=int, default=0)
+    parser.add_argument('--repeat_first_frame', type=int, default=2)
 
     args = parser.parse_args()
 
@@ -291,6 +298,26 @@ if __name__ == '__main__':
             overlay = cv2.addWeighted(semantic_seg_image, 0.7, depth_colored, 0.3, 0)
             cv2.imshow('Overlay', overlay)
             cv2.waitKey(1)
+
+
+            '''
+            Test Code
+            '''
+            # # Apply soble operator to the semantic segmentation image to get the edges
+            # gray = cv2.cvtColor(semantic_seg_image, cv2.COLOR_BGR2GRAY)
+            # sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=5)
+            # sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=5)
+
+            # # Calculate the magnitude of the gradient
+            # magnitude = np.sqrt(sobelx**2 + sobely**2)
+            # magnitude = cv2.normalize(magnitude, None, 0, 255, cv2.NORM_MINMAX)
+            # magnitude = magnitude.astype(np.uint8)
+
+            # cv2.imshow('Magnitude', magnitude)
+            '''
+            End Test Code
+            '''
+
         
             if args.publish_semantic_pointcloud:
 

@@ -40,8 +40,8 @@ if __name__ == "__main__":
     # parser.add_argument("--ply_file", default="/media/cc/Elements/KITTI-360/data_3d_semantics/train/2013_05_28_drive_0000_sync/static/0000001270_0000001549.ply", help="Path to the .ply file")
     parser.add_argument("--ply_file", default="/home/cc/chg_ws/ros_ws/semantic_map_coda_ws/src/dsp_global_mapping/data/result.ply", help="Path to the .ply file")
     #parser.add_argument("--comparison_file", default="/media/cc/Elements/KITTI-360/data_3d_semantics/test/2013_05_28_drive_0008_sync/static/0000001277_0000001491.ply", help="Path to the .ply file")
-    parser.add_argument("--comparison_file", default="/media/cc/Elements/KITTI-360/data_3d_semantics/train/2013_05_28_drive_0000_sync/static/0000000002_0000000385.ply", help="Path to the .ply file")
-    #parser.add_argument("--comparison_file", default=None, help="Path to the .ply file")
+    #parser.add_argument("--comparison_file", default="/media/cc/Elements/KITTI-360/data_3d_semantics/train/2013_05_28_drive_0000_sync/static/0000000002_0000000385.ply", help="Path to the .ply file")
+    parser.add_argument("--comparison_file", default=None, help="Path to the .ply file")
 
     args = parser.parse_args()
 
