@@ -490,9 +490,13 @@ private:
             tracking_ids_last_frame_ = std::vector<int>(keypoints_last_ori_img_.size(), -1);
         }
 
+        /// TODO: This step should not happen but it happens occasionally. Need to find the reason and fix it with a better solution.
         if(tracking_ids_last_frame_.size() != keypoints_last_ori_img_.size()){
-            std::cout << "tracking_ids_last_frame_.size() = " << tracking_ids_last_frame_.size() << std::endl;
-            return;
+            std::cout << "tracking_ids_last_frame_.size() = " << tracking_ids_last_frame_.size();
+            std::cout << "  keypoints_last_ori_img_.size() = " << keypoints_last_ori_img_.size();
+            std::cout << "  Set tracking_ids_last_frame_ to -1" << std::endl;
+            tracking_ids_last_frame_ = std::vector<int>(keypoints_last_ori_img_.size(), -1);
+            // return;
         }
 
         // Set a matrix to quickly find the matched keypoints
